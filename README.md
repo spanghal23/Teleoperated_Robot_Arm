@@ -18,7 +18,7 @@ Setup:
 Media pipe (CV Model) reference: https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker
 
 
-&[Pose Estimation indexes](Images/pose_landmarks_index.png)
+![Pose Estimation indexes](Images/pose_landmarks_index.png)
 
 0 - nose <br>
 1 - left eye (inner) <br>
