@@ -20,6 +20,16 @@ Media pipe (CV Model) reference: https://ai.google.dev/edge/mediapipe/solutions/
 
 ![Pose Estimation indexes](Images/pose_landmarks_index.png)
 
+Relevant Landmarks/Points:
+**11 - left shoulder**<br>
+**12 - right shoulder**<br>
+**13 - left elbow**<br>
+**14 - right elbow**<br>
+**15 - left wrist**<br>
+**16 - right wrist**<br>
+
+
+All Points:
 0 - nose <br>
 1 - left eye (inner) <br>
 2 - left eye <br>
