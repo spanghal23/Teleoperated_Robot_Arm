@@ -4,7 +4,7 @@ Repo for all code relating to the ME6705 Final Project. Members: Mark, Sameer, W
 Setup:
 1. Clone/Download Repo Locally OR Download Github Desktop and clone repo locally
 2. Open a terminal/CMD and cd (change directory) to the repo folder.
-3. **IMPORTANT: Create a virtual enviroment by running this in the cmd (windows)**: 
+3. **IMPORTANT: Create a virtual enviroment by running this in the cmd (windows)**: <br>
           python -m venv venv
           venv\Scripts\activate
 5. Install requirements/dependencies:  
