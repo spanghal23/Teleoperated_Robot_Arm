@@ -27,6 +27,8 @@ Relevant Landmarks/Points:
 **14 - right elbow**<br>
 **15 - left wrist**<br>
 **16 - right wrist**<br>
+**23 - left hip** <br>
+**24 - right hip** <br>
 
 
 All Points:
@@ -53,8 +55,8 @@ All Points:
 20 - right index <br>
 21 - left thumb <br>
 22 - right thumb <br>
-23 - left hip <br>
-24 - right hip <br>
+**23 - left hip** <br>
+**24 - right hip** <br>
 25 - left knee <br>
 26 - right knee <br>
 27 - left ankle <br>
