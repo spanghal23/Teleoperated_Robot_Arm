@@ -9,10 +9,7 @@ Setup:
           venv\Scripts\activate
 5. Install requirements/dependencies:  
      pip install -r requirements.txt
-6. Launch Jupyter Notebook  
-     jupyter notebook
-7. Open the notebook (the name might've changed):  `notebooks/cv_prog1.ipynb`
-8. Run the cells to start the program
+6. Open jupyter notebook files and run cells (You may do this in Visual Studio Code)
 
 
 Media pipe (CV Model) reference: https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker
