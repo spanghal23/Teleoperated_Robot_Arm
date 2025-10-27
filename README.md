@@ -11,7 +11,7 @@ Setup:
      pip install -r requirements.txt
 6. Launch Jupyter Notebook  
      jupyter notebook
-7. Open the notebook:  `notebooks/cv_prototyping_prog1.ipynb`
+7. Open the notebook (the name might've changed):  `notebooks/cv_prog1.ipynb`
 8. Run the cells to start the program
 
 
