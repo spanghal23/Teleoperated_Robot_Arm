@@ -1,7 +1,7 @@
 # me6705_final_project
 Repo for all code relating to the ME6705 Final Project. Members: Mark, Sameer, Wesley, Viraj
 
-Setup:
+Setup for running the CV model or CAN bus related files (not needed for any .mlx files):
 1. Clone/Download Repo Locally OR Download Github Desktop and clone repo locally
 2. Open a terminal/CMD and cd (change directory) to the repo folder.
 3. **IMPORTANT: Create a virtual enviroment by running this in the cmd (windows)**: <br>
