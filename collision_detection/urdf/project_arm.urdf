@@ -1,0 +1,169 @@
+<?xml version="1.0" ?>
+<robot name="side_mount_arm_2link">
+
+  <material name="dark_grey">
+    <color rgba="0.2 0.2 0.2 1.0"/>
+  </material>
+  <material name="arm_green">
+    <color rgba="0.1 0.7 0.1 1.0"/>
+  </material>
+
+  <!-- ===================== LINKS ===================== -->
+
+  <!-- Base fixed to world -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0.05"/>
+      <geometry>
+        <cylinder radius="0.10" length="0.10"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.05"/>
+      <geometry>
+        <cylinder radius="0.10" length="0.10"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Rotating turret on top of base -->
+  <link name="link0">
+    <visual>
+      <origin xyz="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.10" length="0.10"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.10" length="0.10"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- First arm (vertical, 0.35 m along +Z) -->
+  <link name="link1">
+    <!-- shoulder joint pod: SPHERE with radius 0.10 m (diameter 0.20 m) -->
+    <visual>
+      <origin xyz="0 0 0"/>
+      <geometry>
+        <sphere radius="0.10"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0"/>
+      <geometry>
+        <sphere radius="0.10"/>
+      </geometry>
+    </collision>
+
+    <!-- slim arm tube:
+         length 0.35 m,
+         radius 0.05 m (unchanged),
+         aligned with +Z, shifted up 0.175 m
+    -->
+    <visual>
+      <origin xyz="0 0 0.175"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.35"/>
+      </geometry>
+      <material name="arm_green"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.175"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.35"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Second arm (vertical, 0.35 m along +Z) -->
+  <link name="link2">
+    <!-- elbow joint pod: SPHERE with radius 0.10 m (diameter 0.20 m) -->
+    <visual>
+      <origin xyz="0 0 0"/>
+      <geometry>
+        <sphere radius="0.10"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0"/>
+      <geometry>
+        <sphere radius="0.10"/>
+      </geometry>
+    </collision>
+
+    <!-- slim arm tube:
+         length 0.35 m,
+         radius 0.05 m (unchanged),
+         aligned with +Z, shifted up 0.175 m
+    -->
+    <visual>
+      <origin xyz="0 0 0.175"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.35"/>
+      </geometry>
+      <material name="arm_green"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.175"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.35"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- ===================== JOINTS ===================== -->
+
+  <!-- Joint 1: base_yaw
+       base_link -> link0
+       Spins the turret about Z at top of the base.
+       Axis: (0 0 1)
+  -->
+  <joint name="base_yaw" type="revolute">
+    <parent link="base_link"/>
+    <child link="link0"/>
+    <origin xyz="0 0 0.10"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.1416" upper="3.1416" effort="10" velocity="2"/>
+  </joint>
+
+  <!-- Joint 2: side_hinge
+       link0 -> link1
+       Side-mounted hinge at (0.15, 0, 0.05) in link0's frame.
+       Rotates about X: (1 0 0)
+       This tilts link1 forward/back.
+  -->
+  <joint name="side_hinge" type="revolute">
+    <parent link="link0"/>
+    <child link="link1"/>
+    <origin xyz="0.15 0 0.05"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.1416" upper="3.1416" effort="10" velocity="2"/>
+  </joint>
+
+  <!-- Joint 3: elbow_hinge
+       link1 -> link2
+       SAME axis as side_hinge: (1 0 0)
+
+       Placement:
+       origin xyz="-0.15 0 0.35"
+       i.e. go 0.35 m up link1, then -0.15 m back toward the robot center.
+       This pulls the elbow joint back in so that,
+       with all joint angles = 0,
+       the elbow sits directly above the base.
+  -->
+  <joint name="elbow_hinge" type="revolute">
+    <parent link="link1"/>
+    <child link="link2"/>
+    <origin xyz="-0.15 0 0.35"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-3.1416" upper="3.1416" effort="10" velocity="2"/>
+  </joint>
+
+</robot>

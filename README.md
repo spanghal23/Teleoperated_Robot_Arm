@@ -7,9 +7,9 @@ Setup for running the CV model or CAN bus related files (not needed for any .mlx
 3. **IMPORTANT: Create a virtual enviroment by running this in the cmd (windows)**: <br>
           python -m venv venv <br>
           venv\Scripts\activate
-5. Install requirements/dependencies:  
+4. Install requirements/dependencies:  
      pip install -r requirements.txt
-6. Open jupyter notebook files and run cells (You may do this in Visual Studio Code)
+5. Open jupyter notebook files and run cells (You may do this in Visual Studio Code)
 
 
 Media pipe (CV Model) reference: https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker
@@ -62,3 +62,16 @@ All Points:
 30 - right heel <br>
 31 - left foot index <br>
 32 - right foot index <br>
+
+
+Setup for running collision detection model:
+1. Clone/Download Repo Locally OR Download Github Desktop and clone repo locally
+2. Open a terminal/CMD and cd (change directory) to the repo folder.
+3. **IMPORTANT: Create a virtual enviroment by running this in the cmd (windows)**: <br>
+          python -m venv venv <br>
+          venv\Scripts\activate
+4. Install requirements/dependencies:  
+     pip install -r requirementsCollision.txt
+     pip install -r requirementsVision.txt
+5. Change directory to collision detection folder "cd .\collision_detection"
+     Othewise the script will not be able to locate the URDF file
