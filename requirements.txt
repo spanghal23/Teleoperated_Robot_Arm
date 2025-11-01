@@ -6,3 +6,4 @@ matplotlib
 python-can
 pyserial
 scipy
+odrive
