@@ -1,7 +1,7 @@
 # me6705_final_project
 Repo for all code relating to the ME6705 Final Project. Members: Mark, Sameer, Wesley, Viraj
 
-Setup for running the CV model or CAN bus related files (not needed for any .mlx files):
+Windows Setup for running the CV model or CAN bus related files (not needed for any .mlx files):
 1. Clone/Download Repo Locally OR Download Github Desktop and clone repo locally
 2. Open a terminal/CMD and cd (change directory) to the repo folder.
 3. **IMPORTANT: Create a virtual enviroment by running this in the cmd (windows)**: <br>
@@ -10,6 +10,16 @@ Setup for running the CV model or CAN bus related files (not needed for any .mlx
 4. Install requirements/dependencies:  
      pip install -r requirements.txt
 5. Open jupyter notebook files and run cells (You may do this in Visual Studio Code)
+
+
+Linux Setup:
+1. Clone/Download Repo Locally OR Download Github Desktop and clone repo locally
+2. Open a terminal/CMD and cd (change directory) to the repo folder.
+3. python3 -m venv venv
+4. source venv/bin/activate
+5. pip install -r requirements.txt
+6. Deactivate when done: deactivate
+
 
 
 Media pipe (CV Model) reference: https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker
