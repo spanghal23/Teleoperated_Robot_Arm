@@ -1,167 +1,123 @@
-<?xml version="1.0" ?>
-<robot name="side_mount_arm_2link">
+<?xml version="1.0"?>
+<robot name="side_mount_arm_2link_clean">
 
-  <material name="dark_grey">
-    <color rgba="0.2 0.2 0.2 1.0"/>
-  </material>
-  <material name="arm_green">
-    <color rgba="0.1 0.7 0.1 1.0"/>
-  </material>
+  <!-- ============ Materials ============ -->
+  <material name="dark_grey"><color rgba="0.2 0.2 0.2 1.0"/></material>
+  <material name="arm_green"><color rgba="0.1 0.7 0.1 1.0"/></material>
 
-  <!-- ===================== LINKS ===================== -->
+  <!-- ============ LINKS ============ -->
 
   <!-- Base fixed to world -->
   <link name="base_link">
+    <!-- Visual -->
     <visual>
       <origin xyz="0 0 0.05"/>
-      <geometry>
-        <cylinder radius="0.10" length="0.10"/>
-      </geometry>
+      <geometry><cylinder radius="0.10" length="0.10"/></geometry>
       <material name="dark_grey"/>
     </visual>
+    <!-- Collision (slightly smaller to avoid constant ground/pylon flicker) -->
     <collision>
       <origin xyz="0 0 0.05"/>
-      <geometry>
-        <cylinder radius="0.10" length="0.10"/>
-      </geometry>
+      <geometry><cylinder radius="0.095" length="0.10"/></geometry>
     </collision>
   </link>
 
   <!-- Rotating turret on top of base -->
   <link name="link0">
+    <!-- Visual -->
     <visual>
       <origin xyz="0 0 0"/>
-      <geometry>
-        <cylinder radius="0.10" length="0.10"/>
-      </geometry>
+      <geometry><cylinder radius="0.10" length="0.10"/></geometry>
       <material name="dark_grey"/>
     </visual>
+    <!-- Collision (slightly reduced radius) -->
     <collision>
       <origin xyz="0 0 0"/>
-      <geometry>
-        <cylinder radius="0.10" length="0.10"/>
-      </geometry>
+      <geometry><cylinder radius="0.09" length="0.10"/></geometry>
     </collision>
   </link>
 
   <!-- First arm (vertical, 0.35 m along +Z) -->
   <link name="link1">
-    <!-- shoulder joint pod: SPHERE with radius 0.10 m (diameter 0.20 m) -->
+    <!-- Shoulder pod -->
     <visual>
       <origin xyz="0 0 0"/>
-      <geometry>
-        <sphere radius="0.10"/>
-      </geometry>
+      <geometry><sphere radius="0.10"/></geometry>
       <material name="dark_grey"/>
     </visual>
     <collision>
       <origin xyz="0 0 0"/>
-      <geometry>
-        <sphere radius="0.10"/>
-      </geometry>
+      <geometry><sphere radius="0.08"/></geometry>
     </collision>
 
-    <!-- slim arm tube:
-         length 0.35 m,
-         radius 0.05 m (unchanged),
-         aligned with +Z, shifted up 0.175 m
-    -->
+    <!-- Slim arm tube -->
     <visual>
       <origin xyz="0 0 0.175"/>
-      <geometry>
-        <cylinder radius="0.05" length="0.35"/>
-      </geometry>
+      <geometry><cylinder radius="0.05" length="0.35"/></geometry>
       <material name="arm_green"/>
     </visual>
     <collision>
       <origin xyz="0 0 0.175"/>
-      <geometry>
-        <cylinder radius="0.05" length="0.35"/>
-      </geometry>
+      <geometry><cylinder radius="0.045" length="0.35"/></geometry>
     </collision>
   </link>
 
   <!-- Second arm (vertical, 0.35 m along +Z) -->
   <link name="link2">
-    <!-- elbow joint pod: SPHERE with radius 0.10 m (diameter 0.20 m) -->
+    <!-- Elbow pod -->
     <visual>
       <origin xyz="0 0 0"/>
-      <geometry>
-        <sphere radius="0.10"/>
-      </geometry>
+      <geometry><sphere radius="0.10"/></geometry>
       <material name="dark_grey"/>
     </visual>
     <collision>
       <origin xyz="0 0 0"/>
-      <geometry>
-        <sphere radius="0.10"/>
-      </geometry>
+      <geometry><sphere radius="0.08"/></geometry>
     </collision>
 
-    <!-- slim arm tube:
-         length 0.35 m,
-         radius 0.05 m (unchanged),
-         aligned with +Z, shifted up 0.175 m
-    -->
+    <!-- Slim arm tube -->
     <visual>
       <origin xyz="0 0 0.175"/>
-      <geometry>
-        <cylinder radius="0.05" length="0.35"/>
-      </geometry>
+      <geometry><cylinder radius="0.05" length="0.35"/></geometry>
       <material name="arm_green"/>
     </visual>
     <collision>
       <origin xyz="0 0 0.175"/>
-      <geometry>
-        <cylinder radius="0.05" length="0.35"/>
-      </geometry>
+      <geometry><cylinder radius="0.045" length="0.35"/></geometry>
     </collision>
   </link>
 
-  <!-- ===================== JOINTS ===================== -->
+  <!-- ============ JOINTS ============ -->
 
-  <!-- Joint 1: base_yaw
-       base_link -> link0
-       Spins the turret about Z at top of the base.
-       Axis: (0 0 1)
-  -->
+  <!-- J1: base_yaw (base_link -> link0), about Z -->
+  <!-- Raise link0 by 5 mm above base top to remove z-overlap:
+       base top @ z=0.10, link0 spans ±0.05 → set origin z=0.155 so link0 is 0.105..0.205 -->
   <joint name="base_yaw" type="revolute">
     <parent link="base_link"/>
     <child link="link0"/>
-    <origin xyz="0 0 0.10"/>
+    <origin xyz="0 0 0.155"/>
     <axis xyz="0 0 1"/>
     <limit lower="-3.1416" upper="3.1416" effort="10" velocity="2"/>
   </joint>
 
-  <!-- Joint 2: side_hinge
-       link0 -> link1
-       Side-mounted hinge at (0.15, 0, 0.05) in link0's frame.
-       Rotates about X: (1 0 0)
-       This tilts link1 forward/back.
-  -->
+  <!-- J2: side_hinge (link0 -> link1), about X -->
+  <!-- Push out to x=0.22 (was 0.15) so link1's shoulder sphere (coll 0.08) clears link0 (coll 0.09):
+       required ≥ 0.08 + 0.09 = 0.17 → give margin (0.22) -->
   <joint name="side_hinge" type="revolute">
     <parent link="link0"/>
     <child link="link1"/>
-    <origin xyz="0.15 0 0.05"/>
+    <origin xyz="0.22 0 0.05"/>
     <axis xyz="1 0 0"/>
     <limit lower="-3.1416" upper="3.1416" effort="10" velocity="2"/>
   </joint>
 
-  <!-- Joint 3: elbow_hinge
-       link1 -> link2
-       SAME axis as side_hinge: (1 0 0)
-
-       Placement:
-       origin xyz="-0.15 0 0.35"
-       i.e. go 0.35 m up link1, then -0.15 m back toward the robot center.
-       This pulls the elbow joint back in so that,
-       with all joint angles = 0,
-       the elbow sits directly above the base.
-  -->
+  <!-- J3: elbow_hinge (link1 -> link2), about X -->
+  <!-- Pull back slightly more to avoid the elbow pod touching link1 tube:
+       was -0.15; set to -0.18 to ensure > (0.08 + 0.045) radial clearance -->
   <joint name="elbow_hinge" type="revolute">
     <parent link="link1"/>
     <child link="link2"/>
-    <origin xyz="-0.15 0 0.35"/>
+    <origin xyz="-0.18 0 0.35"/>
     <axis xyz="1 0 0"/>
     <limit lower="-3.1416" upper="3.1416" effort="10" velocity="2"/>
   </joint>

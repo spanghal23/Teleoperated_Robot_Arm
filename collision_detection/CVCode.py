@@ -64,11 +64,11 @@ def read_webcam_fast(
         model_complexity=0,          # <<< fastest model
         smooth_landmarks=True,
         enable_segmentation=False,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5
+        min_detection_confidence=0.7,
+        min_tracking_confidence=0.7
     )
 
-    thr = 0.5  # visibility threshold
+    thr = 0.7  # visibility threshold
 
     try:
         while True:
