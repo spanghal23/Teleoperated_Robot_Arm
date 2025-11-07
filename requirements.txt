@@ -7,3 +7,4 @@ python-can
 pyserial
 scipy
 odrive
+customtkinter

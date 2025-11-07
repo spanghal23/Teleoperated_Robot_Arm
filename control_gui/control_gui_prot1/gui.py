@@ -22,8 +22,8 @@ class TextRedirector(io.TextIOBase):
 class ODriveGUI(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("ODrive CAN GUI")
-        self.geometry("1600x800")
+        self.title("ODrive CAN GUI (Linux Only)")
+        self.geometry("1600x800+200+100")
         ctk.set_default_color_theme("blue")
         ctk.set_widget_scaling(1.1)
 
@@ -58,7 +58,7 @@ class ODriveGUI(ctk.CTk):
         sec1 = ctk.CTkFrame(self.left_col)
         sec1.pack(fill="x", pady=10)
 
-        ctk.CTkLabel(sec1, text="1. Connect to CAN (enter password if prompted):", font=self.font_header).pack(side="left", padx=10)
+        ctk.CTkLabel(sec1, text="1. Connect to CAN (enter password in terminal if prompted):", font=self.font_header).pack(side="left", padx=10)
         ctk.CTkButton(sec1, text="Connect", command=self.threaded(self.connect_can), font=self.font_button).pack(side="left", padx=10)
 
         # ---------- 2. Enumerate ----------
@@ -66,7 +66,7 @@ class ODriveGUI(ctk.CTk):
         sec2.pack(fill="x", pady=10)
         ctk.CTkLabel(sec2, text="2. Enumerate ODrives (discover nodes):", font=self.font_header).pack(side="left", padx=10)
         ctk.CTkButton(sec2, text="Enumerate", command=self.threaded(self.enumerate_nodes), font=self.font_button).pack(side="left", padx=5)
-        ctk.CTkButton(sec2, text="Calibrate All", command=self.threaded(self.calibrate_all), font=self.font_button).pack(side="left", padx=5)
+        ctk.CTkButton(sec2, text="(Optional) Calibrate", command=self.threaded(self.calibrate_all), font=self.font_button).pack(side="left", padx=5)
 
         # ---------- 3. Axis State ----------   
         sec3 = ctk.CTkFrame(self.left_col)
@@ -150,6 +150,12 @@ class ODriveGUI(ctk.CTk):
         self.error_btn.pack(side="left", padx=5)
         ctk.CTkButton(sec6, text="Clear All Errors", command=self.threaded(self.clear_errors), font=self.font_button).pack(side="left", padx=5)
 
+        # Add an error display area below buttons
+        self.error_output = ctk.CTkTextbox(sec6, height=80, width=420, font=("Consolas", 12))
+        self.error_output.pack(fill="x", padx=10, pady=5)
+        self.error_output.insert("end", "Error listener inactive.\n")
+        self.error_output.configure(state="disabled")
+
         # ---------- 7. Shutdown ----------
         sec7 = ctk.CTkFrame(self.left_col)
         sec7.pack(fill="x", pady=10)
@@ -192,15 +198,39 @@ class ODriveGUI(ctk.CTk):
             lbl.grid(row=0, column=i+1, padx=10, sticky="w")
             self.zero_status[i] = lbl
 
-        # === 4. Heartbeat Section (one per node) ===
+        # === 4. Heartbeat Section (two-column layout) ===
         sec_r4 = ctk.CTkFrame(self.right_col)
         sec_r4.pack(fill="x", pady=10)
-        ctk.CTkLabel(sec_r4, text="Heartbeat", font=self.font_header).grid(row=0, column=0, sticky="w", padx=10)
+
+        # Header
+        ctk.CTkLabel(sec_r4, text="Heartbeat", font=self.font_header).grid(
+            row=0, column=0, columnspan=2, sticky="w", padx=10
+        )
+
+        # ---- LEFT COLUMN: System State ----
+        self.system_state_label = ctk.CTkLabel(
+            sec_r4,
+            text="IDLE",
+            font=("Arial", 26, "bold"),
+            text_color="#00BFFF"
+        )
+        self.system_state_label.grid(row=1, column=0, rowspan=4, sticky="nsew", padx=15, pady=10)
+
+        # ---- RIGHT COLUMN: Heartbeat per node ----
         self.heartbeat_labels = {}
         for i in range(3):
-            lbl = ctk.CTkLabel(sec_r4, text=f"Node {i}: state=--- err=---", text_color="gray", font=self.font_header)
-            lbl.grid(row=i+1, column=0, columnspan=2, sticky="w", padx=20, pady=2)
+            lbl = ctk.CTkLabel(
+                sec_r4,
+                text=f"Node {i}: state=--- err=---",
+                text_color="gray",
+                font=self.font_header
+            )
+            lbl.grid(row=i+1, column=1, sticky="w", padx=20, pady=2)
             self.heartbeat_labels[i] = lbl
+
+        # Optional: make columns expand evenly
+        sec_r4.grid_columnconfigure(0, weight=1)
+        sec_r4.grid_columnconfigure(1, weight=3)
 
         # === 5. Feedback (pos / vel) Section (one per node) ===
         sec_r5 = ctk.CTkFrame(self.right_col)
@@ -395,23 +425,48 @@ class ODriveGUI(ctk.CTk):
             time.sleep(1)
 
     def toggle_error_listener(self):
-        if not self.error_running:
+        if not getattr(self, "error_running", False):
             self.error_running = True
             self.error_btn.configure(text="Stop Listening")
+            self.error_output.configure(state="normal")
+            self.error_output.insert("end", "⚙️  Starting error listener...\n")
+            self.error_output.configure(state="disabled")
             threading.Thread(target=self.error_loop, daemon=True).start()
         else:
             self.error_running = False
             self.error_btn.configure(text="Start Listening")
+            self.error_output.configure(state="normal")
+            self.error_output.insert("end", "🛑 Error listener stopped.\n")
+            self.error_output.configure(state="disabled")
+
 
     def error_loop(self):
         while self.error_running:
+            if not hasattr(self, "mgr") or not getattr(self.mgr, "nodes", None):
+                time.sleep(1)
+                continue
+
             for n in self.mgr.nodes:
-                result = self.mgr.listen_for_heartbeat(n, duration=0.5)
-                if result:
-                    error, state = result
-                    if error != 0:
-                        print(f"⚠️ Node {n} reported error code {error}")
+                try:
+                    # Example: ODrive or CAN manager should have a method like this:
+                    # (You might need to replace this with whatever you use to query errors)
+                    err, state = self.mgr.read_errors(n)
+                except Exception as e:
+                    err = None
+                    print(f"Error reading node {n}: {e}")
+                    continue
+
+                if err and err != 0:
+                    # Log to GUI
+                    msg = f"⚠️ Node {n}: error={err}, state={state}\n"
+                    print(msg.strip())
+                    self.error_output.configure(state="normal")
+                    self.error_output.insert("end", msg)
+                    self.error_output.see("end")
+                    self.error_output.configure(state="disabled")
+
             time.sleep(1)
+
 
 
     def poll_heartbeat(self):
@@ -445,7 +500,7 @@ class ODriveGUI(ctk.CTk):
 
 
     def update_feedback_display(self):
-        """Refresh right-column displays: heartbeat + feedback."""
+        """Refresh right-column displays: heartbeat + feedback + system state."""
         # connection / enumerate summary
         if hasattr(self.mgr, "nodes"):
             nodes_text = ", ".join(f"Node {n}" for n in self.mgr.nodes) or "None"
@@ -457,9 +512,13 @@ class ODriveGUI(ctk.CTk):
         # zero refs (if tracked)
         for nid, lbl in self.zero_status.items():
             if hasattr(self, "zero_offsets") and nid in self.zero_offsets:
-                lbl.configure(text=f"Node {nid}: {self.zero_offsets[nid]:.3f} turns", text_color="green")
+                lbl.configure(
+                    text=f"Node {nid}: {self.zero_offsets[nid]:.3f} turns",
+                    text_color="green"
+                )
 
         now = time.time()
+        all_states = []  # collect node states for global display
 
         # ---------- HEARTBEAT ----------
         for nid, lbl in self.heartbeat_labels.items():
@@ -479,6 +538,26 @@ class ODriveGUI(ctk.CTk):
             else:
                 lbl.configure(text=f"{pulse} Node {nid}: state={state} err={err}", text_color="green")
 
+            if state:
+                all_states.append(state)
+
+        # ---------- SYSTEM STATE SUMMARY ----------
+        if all_states:
+            # determine most frequent / aggregate state
+            if all(s == "CLOSED_LOOP_CONTROL" for s in all_states):
+                sys_state, color = "CLOSED LOOP", "#00FF7F"
+            elif all(s == "IDLE" for s in all_states):
+                sys_state, color = "IDLE", "#FFA500"
+            elif any("CALIB" in s for s in all_states):
+                sys_state, color = "CALIBRATING", "#1E90FF"
+            else:
+                sys_state, color = "CUSTOM", "#7E6C6C"
+        else:
+            sys_state, color = "—", "gray"
+
+        # update label text + color
+        if hasattr(self, "system_state_label"):
+            self.system_state_label.configure(text=sys_state, text_color=color)
 
         # ---------- FEEDBACK (pos / vel) ----------
         for nid, lbl in self.feedback_labels.items():
@@ -493,7 +572,10 @@ class ODriveGUI(ctk.CTk):
             pulse = self.tiny_pulse(f"fb{nid}")  # use unique key so it pulses independently
 
             if pos_abs is None:
-                lbl.configure(text=f"{pulse} Node {nid}: pos(abs)=— pos(rel)=— vel=—", text_color="gray")
+                lbl.configure(
+                    text=f"{pulse} Node {nid}: pos(abs)=— pos(rel)=— vel=—",
+                    text_color="gray",
+                )
                 continue
 
             pos_rel = pos_abs - zero
@@ -515,6 +597,7 @@ class ODriveGUI(ctk.CTk):
 
         # run again in 0.5s
         self.after(500, self.update_feedback_display)
+
 
 
 
