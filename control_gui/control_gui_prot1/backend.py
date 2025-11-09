@@ -22,7 +22,9 @@ class ODriveManager:
         self.channel = channel
         self.bitrate = bitrate
         self.bus = None
+        self.latest = {}  
         self.nodes = []
+        self._listener_running = False
 
     def setup_can_interface(self):
         """Bring up can0 and create a python-can Bus."""
@@ -118,47 +120,6 @@ class ODriveManager:
                 print(f"✅ Node {node_id} entered IDLE")
         except Exception as e:
             print(f"⚠️ Error clearing node {node_id}: {e}")
-
-
-    def listen_for_heartbeat(self, node_id, duration=2.0):
-        """Return last-known (error, state) tuple within a time window."""
-        end = time.time() + duration
-        result = None
-        while time.time() < end:
-            msg = self.bus.recv(timeout=0.2)
-            if msg:
-                cmd_id = msg.arbitration_id & 0x1F
-                nid = msg.arbitration_id >> 5
-                if cmd_id == 0x01 and nid == node_id:
-                    error, state, *_ = struct.unpack('<IBBB', bytes(msg.data[:7]))
-                    result = (error, state)
-        return result
-
-
-    def read_feedback(self, node_id: int, timeout: float = 0.75):
-        """Requests and reads encoder position/velocity (in turns, turns/s)."""
-        if not getattr(self, 'bus', None):
-            raise RuntimeError("CAN bus not initialized")
-
-        request_id = (node_id << 5) | 0x09
-        # Send remote frame request
-        request = can.Message(
-            arbitration_id=request_id,
-            is_extended_id=False,
-            is_remote_frame=True
-        )
-        self.bus.send(request)
-
-        # Wait for response
-        msg = self.bus.recv(timeout)
-        if msg and msg.arbitration_id == request_id and not msg.is_remote_frame:
-            try:
-                pos, vel = struct.unpack('<ff', msg.data[:8])
-                return pos, vel
-            except struct.error:
-                pass
-        return None, None
-
 
     def _get_address_msg(self):
         """Broadcast discovery request."""
@@ -274,6 +235,96 @@ class ODriveManager:
             print("♻️ Node rebooting after save...")
 
 
+    def listen_for_heartbeat(self, node_id, duration=0.0):
+        """Return last cached (error, state) or None."""
+        return self.latest.get(node_id, {}).get("heartbeat")
+
+    def read_feedback(self, node_id, timeout=0.0):
+        """Return last cached (pos, vel) or (None, None)."""
+        return self.latest.get(node_id, {}).get("feedback", (None, None))
+    
+
+    def start_listener(self):
+        """Continuously read CAN frames and cache latest heartbeat/feedback."""
+        if not getattr(self, "bus", None):
+            raise RuntimeError("CAN bus not initialized")
+        if self._listener_running:
+            return
+        self._listener_running = True
+
+        def loop():
+            import struct, time
+            while getattr(self, "bus", None):
+                try:
+                    msg = self.bus.recv(timeout=0.0)
+                    if not msg:
+                        time.sleep(0.001)
+                        continue
+
+                    node_id = msg.arbitration_id >> 5
+                    cmd_id  = msg.arbitration_id & 0x1F
+
+                    if cmd_id == 0x01:        # Heartbeat
+                        try:
+                            err, state, *_ = struct.unpack("<IBBB", msg.data[:7])
+                            self.latest.setdefault(node_id, {})["heartbeat"] = (err, state)
+                        except struct.error:
+                            pass
+
+                    elif cmd_id == 0x09 and not msg.is_remote_frame:  # Feedback reply
+                        try:
+                            pos, vel = struct.unpack("<ff", msg.data[:8])
+                            self.latest.setdefault(node_id, {})["feedback"] = (pos, vel)
+                        except struct.error:
+                            pass
+
+                    self.latest.setdefault(node_id, {})["updated"] = time.time()
+
+                except Exception as e:
+                    print(f"⚠️ Listener error: {e}")
+                    time.sleep(0.05)
+
+            self._listener_running = False
+
+        import threading
+        threading.Thread(target=loop, daemon=True).start()
+        print("🟢 CAN listener thread started.")
 
 
 
+        """
+    def listen_for_heartbeat(self, node_id, duration=0.0):
+       """ """Return (error, state) if heartbeat frame for this node is already waiting.""""""
+        msg = self.bus.recv(duration)     # non-blocking when 0
+        if msg is None:
+            return None
+        cmd_id = msg.arbitration_id & 0x1F
+        nid = msg.arbitration_id >> 5
+        if cmd_id == 0x01 and nid == node_id:
+            try:
+                error, state, *_ = struct.unpack('<IBBB', msg.data[:7])
+                return (error, state)
+            except struct.error:
+                pass
+        return None
+
+    def read_feedback(self, node_id: int, timeout: float = 0.0):
+      """  """Try to read latest feedback frame without blocking.""" """
+        if not getattr(self, 'bus', None):
+            raise RuntimeError("CAN bus not initialized")
+
+
+        msg = self.bus.recv(timeout)
+        if not msg:
+            return None, None
+
+        nid = msg.arbitration_id >> 5
+        cmd_id = msg.arbitration_id & 0x1F
+        if cmd_id == 0x09 and nid == node_id and not msg.is_remote_frame:
+            try:
+                pos, vel = struct.unpack('<ff', msg.data[:8])
+                return pos, vel
+            except struct.error:
+                pass
+        return None, None
+"""

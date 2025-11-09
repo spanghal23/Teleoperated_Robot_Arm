@@ -207,14 +207,17 @@ class ODriveGUI(ctk.CTk):
             row=0, column=0, columnspan=2, sticky="w", padx=10
         )
 
-        # ---- LEFT COLUMN: System State ----
-        self.system_state_label = ctk.CTkLabel(
-            sec_r4,
-            text="IDLE",
-            font=("Arial", 26, "bold"),
-            text_color="#00BFFF"
-        )
-        self.system_state_label.grid(row=1, column=0, rowspan=4, sticky="nsew", padx=15, pady=10)
+        # ---- LEFT COLUMN: Per-node State ----
+        self.state_labels = {}
+        for i in range(3):
+            lbl = ctk.CTkLabel(
+                sec_r4,
+                text=f"Node {i}: —",
+                font=self.font_header,
+                text_color="gray"
+            )
+            lbl.grid(row=i+1, column=0, sticky="nsew", padx=15, pady=10)
+            self.state_labels[i] = lbl
 
         # ---- RIGHT COLUMN: Heartbeat per node ----
         self.heartbeat_labels = {}
@@ -228,7 +231,7 @@ class ODriveGUI(ctk.CTk):
             lbl.grid(row=i+1, column=1, sticky="w", padx=20, pady=2)
             self.heartbeat_labels[i] = lbl
 
-        # Optional: make columns expand evenly
+        # make columns expand evenly
         sec_r4.grid_columnconfigure(0, weight=1)
         sec_r4.grid_columnconfigure(1, weight=3)
 
@@ -247,15 +250,13 @@ class ODriveGUI(ctk.CTk):
     # threaded wrapper
     # ============================================================
     def threaded(self, fn):
-        def wrapper():
-            def run_safe():
-                try:
-                    fn()
-                except Exception:
-                    import traceback
-                    traceback.print_exc()
-            return lambda: threading.Thread(target=run_safe, daemon=True).start()
-        return wrapper()
+        def run_safe():
+            try:
+                fn()
+            except Exception:
+                import traceback
+                traceback.print_exc()
+        return lambda: threading.Thread(target=run_safe, daemon=True).start()
 
     # ============================================================
     # backend actions
@@ -273,6 +274,7 @@ class ODriveGUI(ctk.CTk):
         if ok:
             self.conn_status.configure(text="✅ Connected", text_color="green")
             self.status_running = True
+            self.mgr.start_listener() 
             self.poll_heartbeat()
             self.update_feedback_display()
             print("✅ CAN connection established successfully.")
@@ -300,51 +302,33 @@ class ODriveGUI(ctk.CTk):
             try:
                 delta = float(val)
 
-                # 1) get zero; if not set yet, try to seed it from feedback once
-                zero = self.zero_offsets.get(node_id, None)
+                # 1) get zero; if missing, use latest known pos
+                zero = self.zero_offsets.get(node_id)
                 if zero is None:
-                    pos0, _ = self.mgr.read_feedback(node_id, timeout=0.3)
-                    if pos0 is not None:
-                        zero = pos0
-                        self.zero_offsets[node_id] = zero
-                        print(f"ℹ️ Node {node_id} had no zero; seeding zero={zero:.3f}")
-                        self.latest.setdefault(node_id, {})
-                        self.latest[node_id].update({"pos": pos0, "updated": time.time()})
-                        if node_id in self.zero_status:
-                            self.zero_status[node_id].configure(
-                                text=f"Node {node_id}: {zero:.3f} turns", text_color="green"
-                            )
-                    else:
-                        zero = 0.0
-                        print(f"⚠️ Node {node_id}: no feedback to seed zero; assuming zero=0.000")
+                    zero = self.latest.get(node_id, {}).get("pos", 0.0)
+                    self.zero_offsets[node_id] = zero
+                    print(f"ℹ️ Node {node_id} had no zero; using cached pos={zero:.3f}")
+                    if node_id in self.zero_status:
+                        self.zero_status[node_id].configure(
+                            text=f"Node {node_id}: {zero:.3f} turns", text_color="orange"
+                        )
 
-                # 2) compute target purely from zeroed frame
+                # 2) compute target and send    immediately
                 target_abs = zero + delta
-
-                # 🔒 SAFETY CHECK — ensure axis is closed loop
-                hb = self.mgr.listen_for_heartbeat(node_id, duration=0.3)
-                if hb:
-                    err, state = hb
-                    if state != 8:
-                        print(f"⚠️ Node {node_id} is in state {state} — switch to CLOSED_LOOP_CONTROL (8) before moving.")
-                        continue
-                else:
-                    print(f"⚠️ Node {node_id}: no heartbeat — cannot verify axis state.")
-                    continue
-
-                # 3) send command
                 self.mgr.set_position(node_id, target_abs)
 
-                # 4) cache for GUI
-                self.latest.setdefault(node_id, {})
-                self.latest[node_id].update({"pos": target_abs, "updated": time.time()})
-
+                # 3) update cache and GUI log
+                self.latest.setdefault(node_id, {}).update({
+                    "pos": target_abs,
+                    "updated": time.time(),
+                })
                 print(f"🎯 Node {node_id}: abs_target={target_abs:.3f} (zero={zero:.3f}, Δ={delta:+.3f})")
 
             except ValueError:
                 print(f"⚠️ Invalid input for node {node_id}")
             except Exception as e:
                 print(f"⚠️ Error moving node {node_id}: {e}")
+
 
 
 
@@ -448,17 +432,20 @@ class ODriveGUI(ctk.CTk):
 
             for n in self.mgr.nodes:
                 try:
-                    # Example: ODrive or CAN manager should have a method like this:
-                    # (You might need to replace this with whatever you use to query errors)
-                    err, state = self.mgr.read_errors(n)
+                    # get latest heartbeat (contains error + state)
+                    hb = self.mgr.listen_for_heartbeat(n)
+                    if hb:
+                        err, state = hb
+                    else:
+                        err, state = None, None
                 except Exception as e:
-                    err = None
-                    print(f"Error reading node {n}: {e}")
+                    err, state = None, None
+                    print(f"⚠️ Error reading heartbeat for node {n}: {e}")
                     continue
 
+                # if an error code is active, log it
                 if err and err != 0:
-                    # Log to GUI
-                    msg = f"⚠️ Node {n}: error={err}, state={state}\n"
+                    msg = f"⚠️ Node {n}: error=0x{err:08X}, state={state}\n"
                     print(msg.strip())
                     self.error_output.configure(state="normal")
                     self.error_output.insert("end", msg)
@@ -467,41 +454,41 @@ class ODriveGUI(ctk.CTk):
 
             time.sleep(1)
 
-
-
     def poll_heartbeat(self):
-        """Poll ODrives periodically for heartbeat + feedback."""
+        """Fast, non-blocking poll for heartbeat + feedback."""
         if not getattr(self.mgr, "bus", None):
             self.after(500, self.poll_heartbeat)
             return
 
         for n in getattr(self.mgr, "nodes", []):
             try:
-                # ---- heartbeat ----
-                result = self.mgr.listen_for_heartbeat(n, duration=0.05)
-                if result:
-                    err, state = result
-                    self.latest.setdefault(n, {})
-                    self.latest[n].update({
+                # Non-blocking reads
+                err_state = self.mgr.listen_for_heartbeat(n, duration=0)
+                if err_state:
+                    err, state = err_state
+                    self.latest.setdefault(n, {}).update({
                         "error": err,
                         "state": state,
                         "updated": time.time()
                     })
 
-                # ---- feedback (pos/vel) ----
-                pos, vel = self.mgr.read_feedback(n, timeout=0.05)
+                pos, vel = self.mgr.read_feedback(n, timeout=0)
                 if pos is not None:
-                    self.latest[n].update({"pos": pos, "vel": vel})
+                    self.latest.setdefault(n, {}).update({
+                        "pos": pos,
+                        "vel": vel,
+                        "updated": time.time()
+                    })
             except Exception as e:
-                print(f"⚠️ Heartbeat/feedback poll failed for node {n}: {e}")
+                print(f"⚠️ Poll failed for node {n}: {e}")
 
-        # schedule again
-        self.after(250, self.poll_heartbeat)
+        # Run again at ~10 Hz
+        self.after(50, self.poll_heartbeat)
 
 
     def update_feedback_display(self):
-        """Refresh right-column displays: heartbeat + feedback + system state."""
-        # connection / enumerate summary
+        """Refresh right-column displays: per-node heartbeat, state, and feedback."""
+        # Enumerate summary
         if hasattr(self.mgr, "nodes"):
             nodes_text = ", ".join(f"Node {n}" for n in self.mgr.nodes) or "None"
             self.enum_status.configure(
@@ -509,98 +496,85 @@ class ODriveGUI(ctk.CTk):
                 text_color=("green" if self.mgr.nodes else "gray")
             )
 
-        # zero refs (if tracked)
+        # Zero refs
         for nid, lbl in self.zero_status.items():
             if hasattr(self, "zero_offsets") and nid in self.zero_offsets:
-                lbl.configure(
-                    text=f"Node {nid}: {self.zero_offsets[nid]:.3f} turns",
-                    text_color="green"
-                )
+                lbl.configure(text=f"Node {nid}: {self.zero_offsets[nid]:.3f} turns", text_color="green")
 
         now = time.time()
-        all_states = []  # collect node states for global display
 
-        # ---------- HEARTBEAT ----------
-        for nid, lbl in self.heartbeat_labels.items():
-            data = self.latest.get(nid, {})
-            state = data.get("state")
-            err = data.get("error")
-            updated = data.get("updated", 0)
-            age = now - updated
+        # ---------- PER-NODE: heartbeat + big state + feedback ----------
+        for nid in self.heartbeat_labels.keys():   # show rows for 0,1,2 regardless
+            data = self.mgr.latest.get(nid, {})    # <-- always read backend cache
+            hb = data.get("heartbeat")             # (err, state) or None
+            fb = data.get("feedback")              # (pos, vel) or None
+            updated = data.get("updated", 0.0)
+            age = now - updated if updated else 1e9
+
+            # Defaults
+            err, state = (None, None) if not hb else hb
+            pos, vel = (None, None) if not fb else fb
+
+            # ---- heartbeat line (right column) ----
             pulse = self.tiny_pulse(nid)
-
-            if state is None:
-                lbl.configure(text=f"{pulse} Node {nid}: state=— err=—", text_color="gray")
-            elif age > 1.5:
-                lbl.configure(text=f"{pulse} Node {nid}: stale (>{age:.1f}s)", text_color="orange")
-            elif err not in (None, 0):
-                lbl.configure(text=f"{pulse} Node {nid}: ⚠️ err={err} state={state}", text_color="red")
+            h_lbl = self.heartbeat_labels[nid]
+            if hb is None:
+                h_lbl.configure(text=f"{pulse} Node {nid}: —", text_color="gray", font=self.font_header)
             else:
-                lbl.configure(text=f"{pulse} Node {nid}: state={state} err={err}", text_color="green")
-
-            if state:
-                all_states.append(state)
-
-        # ---------- SYSTEM STATE SUMMARY ----------
-        if all_states:
-            # determine most frequent / aggregate state
-            if all(s == "CLOSED_LOOP_CONTROL" for s in all_states):
-                sys_state, color = "CLOSED LOOP", "#00FF7F"
-            elif all(s == "IDLE" for s in all_states):
-                sys_state, color = "IDLE", "#FFA500"
-            elif any("CALIB" in s for s in all_states):
-                sys_state, color = "CALIBRATING", "#1E90FF"
-            else:
-                sys_state, color = "CUSTOM", "#7E6C6C"
-        else:
-            sys_state, color = "—", "gray"
-
-        # update label text + color
-        if hasattr(self, "system_state_label"):
-            self.system_state_label.configure(text=sys_state, text_color=color)
-
-        # ---------- FEEDBACK (pos / vel) ----------
-        for nid, lbl in self.feedback_labels.items():
-            data = self.latest.get(nid, {})
-            pos_abs = data.get("pos")
-            vel = data.get("vel")
-            err = data.get("error")
-            updated = data.get("updated", 0)
-            age = now - updated
-
-            zero = self.zero_offsets.get(nid, 0.0)
-            pulse = self.tiny_pulse(f"fb{nid}")  # use unique key so it pulses independently
-
-            if pos_abs is None:
-                lbl.configure(
-                    text=f"{pulse} Node {nid}: pos(abs)=— pos(rel)=— vel=—",
-                    text_color="gray",
+                # color: stale -> orange, err!=0 -> red, else green
+                if age > 1.5:
+                    hb_color = "orange"
+                elif err not in (None, 0):
+                    hb_color = "red"
+                else:
+                    hb_color = "green"
+                h_lbl.configure(
+                    text=f"{pulse} Node {nid}: state={state} err={err}",
+                    text_color=hb_color,
+                    font=self.font_header
                 )
-                continue
 
-            pos_rel = pos_abs - zero
-            color = "green"
-            if err not in (None, 0):
-                color = "red"
-            elif age > 1.5:
-                color = "orange"
+            # ---- big state label (left column) ----
+            s_lbl = self.state_labels.get(nid)
+            if s_lbl:
+                if state == 8:
+                    s_lbl.configure(text=f"Node {nid}: CLOSED LOOP", text_color="#00FF7F", font=self.font_header)
+                elif state == 1:
+                    s_lbl.configure(text=f"Node {nid}: IDLE", text_color="#FFA500", font=self.font_header)
+                elif state is None:
+                    s_lbl.configure(text=f"Node {nid}: —", text_color="gray", font=self.font_header)
+                else:
+                    s_lbl.configure(text=f"Node {nid}: STATE {state}", text_color="#7E6C6C", font=self.font_header)
 
-            lbl.configure(
-                text=(
-                    f"{pulse} Node {nid}: "
-                    f"pos(abs)={pos_abs:7.3f}  "
-                    f"pos(rel)={pos_rel:+7.3f}  "
-                    f"vel={vel:6.3f}"
-                ),
-                text_color=color,
-            )
+            # ---- feedback (pos / vel) ----
+            fb_lbl = self.feedback_labels.get(nid)
+            if fb_lbl:
+                pulse_fb = self.tiny_pulse(f"fb{nid}")
+                if pos is None:
+                    fb_lbl.configure(
+                        text=f"{pulse_fb} Node {nid}: pos(abs)=— pos(rel)=— vel=—",
+                        text_color="gray",
+                        font=self.font_header
+                    )
+                else:
+                    zero = self.zero_offsets.get(nid, 0.0)
+                    pos_rel = pos - zero
+                    # reuse the same color logic as heartbeat line
+                    if age > 1.5:
+                        fb_color = "orange"
+                    elif err not in (None, 0):
+                        fb_color = "red"
+                    else:
+                        fb_color = "green"
+                    fb_lbl.configure(
+                        text=(f"{pulse_fb} Node {nid}: "
+                            f"pos(abs)={pos:7.3f}  pos(rel)={pos_rel:+7.3f}  vel={vel:6.3f}"),
+                        text_color=fb_color,
+                        font=self.font_header
+                    )
 
-        # run again in 0.5s
-        self.after(500, self.update_feedback_display)
-
-
-
-
+        # tick again
+        self.after(100, self.update_feedback_display)
 
     def start_status_thread(self):
         def worker():
@@ -643,3 +617,46 @@ class ODriveGUI(ctk.CTk):
 
 
         
+
+
+    def start_listener(self):
+        """Continuously read CAN frames in background and cache latest heartbeat/feedback."""
+        if not getattr(self, "bus", None):
+            raise RuntimeError("CAN bus not initialized")
+
+        def loop():
+            import struct, time
+            while getattr(self, "bus", None):
+                try:
+                    msg = self.bus.recv(timeout=0.0)
+                    if not msg:
+                        time.sleep(0.001)
+                        continue
+
+                    node_id = msg.arbitration_id >> 5
+                    cmd_id = msg.arbitration_id & 0x1F
+
+                    if cmd_id == 0x01:  # Heartbeat
+                        try:
+                            error, state, *_ = struct.unpack("<IBBB", msg.data[:7])
+                            self.latest.setdefault(node_id, {})["heartbeat"] = (error, state)
+                            self.latest[node_id]["updated"] = time.time()
+                        except struct.error:
+                            pass
+
+                    elif cmd_id == 0x09:  # Feedback (pos, vel)
+                        try:
+                            pos, vel = struct.unpack("<ff", msg.data[:8])
+                            self.latest.setdefault(node_id, {})["feedback"] = (pos, vel)
+                            self.latest[node_id]["updated"] = time.time()
+                        except struct.error:
+                            pass
+
+                except Exception as e:
+                    print(f"⚠️ Listener error: {e}")
+                    time.sleep(0.1)
+
+        # run in background thread
+        import threading
+        threading.Thread(target=loop, daemon=True).start()
+        print("🟢 CAN listener thread started.")
