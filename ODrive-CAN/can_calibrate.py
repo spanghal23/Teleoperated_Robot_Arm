@@ -7,6 +7,9 @@ import json
 import struct
 from can_simple_utils import CanSimpleNode, REBOOT_ACTION_SAVE # if this import fails, make sure you copy the whole folder from the git repository
 
+# python3 ODrive-CAN/can_calibrate.py --channel can0 --node-id 2 --save-config
+
+
 async def main():
     parser = argparse.ArgumentParser(description='Script to calibrate the ODrive over CAN bus.')
     parser.add_argument('-i', '--interface', type=str, default='socketcan', help='Interface type (e.g., socketcan, slcan). Default is socketcan.')
