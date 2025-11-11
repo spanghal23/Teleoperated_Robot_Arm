@@ -5,7 +5,7 @@ Functions:
 
 """
 
-import can, struct, time, subprocess
+import can, struct, time, subprocess, os, json
 
 
 # backend.py (append this at the end of your function definitions)
@@ -195,6 +195,7 @@ class ODriveManager:
         Runs a FULL_CALIBRATION_SEQUENCE for a given node and waits until done.
         """
         if not getattr(self, 'bus', None):
+            print("⚠️ CAN bus not initialized — cannot calibrate.")
             raise RuntimeError("CAN bus not initialized")
 
         print(f"⚙️ Starting calibration for node {node_id}...")
@@ -289,6 +290,153 @@ class ODriveManager:
         import threading
         threading.Thread(target=loop, daemon=True).start()
         print("🟢 CAN listener thread started.")
+
+
+
+
+    def make_config_json(self, node_id: int, vel_limit: float, vel_tol: float,
+                        torque_min: float, torque_max: float, save_path: str = None):
+        """
+        Generate an ODrive config JSON for a given node with custom velocity/torque limits.
+        If save_path is given, write it to file. Otherwise, return the dict.
+        """
+
+        # ---- base template ----
+        cfg = {
+            "config.dc_bus_overvoltage_trip_level": 36,
+            "config.dc_bus_undervoltage_trip_level": 10.5,
+            "config.dc_max_positive_current": 1e9,
+            "config.dc_max_negative_current": -1e9,
+            "config.brake_resistor0.enable": True,
+            "config.brake_resistor0.resistance": 2,
+
+            f"axis{node_id}.config.motor.motor_type": 0,
+            f"axis{node_id}.config.motor.pole_pairs": 20,
+            f"axis{node_id}.config.motor.torque_constant": 0.09188888888888888,
+            f"axis{node_id}.config.motor.current_soft_max": 22,
+            f"axis{node_id}.config.motor.current_hard_max": 38.6,
+            f"axis{node_id}.config.motor.calibration_current": 18,
+            f"axis{node_id}.config.motor.resistance_calib_max_voltage": 5,
+
+            f"axis{node_id}.config.calibration_lockin.current": 18,
+            f"axis{node_id}.motor.motor_thermistor.config.enabled": False,
+
+            f"axis{node_id}.controller.config.control_mode": 3,
+            f"axis{node_id}.controller.config.input_mode": 1,
+            f"axis{node_id}.controller.config.vel_limit": vel_limit,
+            f"axis{node_id}.controller.config.vel_limit_tolerance": vel_tol,
+
+            f"axis{node_id}.config.torque_soft_min": torque_min,
+            f"axis{node_id}.config.torque_soft_max": torque_max,
+
+            "can.config.protocol": 1,
+            "can.config.baud_rate": 250000,
+
+            f"axis{node_id}.config.can.node_id": node_id,
+            f"axis{node_id}.config.can.heartbeat_msg_rate_ms": 100,
+            f"axis{node_id}.config.can.encoder_msg_rate_ms": 10,
+            f"axis{node_id}.config.can.iq_msg_rate_ms": 10,
+            f"axis{node_id}.config.can.torques_msg_rate_ms": 10,
+            f"axis{node_id}.config.can.error_msg_rate_ms": 10,
+            f"axis{node_id}.config.can.temperature_msg_rate_ms": 10,
+            f"axis{node_id}.config.can.bus_voltage_msg_rate_ms": 10,
+
+            f"axis{node_id}.config.enable_watchdog": False,
+            f"axis{node_id}.config.load_encoder": 13,
+            f"axis{node_id}.config.commutation_encoder": 13,
+            "config.enable_uart_a": False
+        }
+
+
+
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        with open(save_path, "w") as f:
+            json.dump(cfg, f, indent=2)
+        print(f"💾  Wrote {save_path} for node {node_id}")
+        return cfg
+
+
+
+    def flash_config_over_can(self, nodes, vel_limit, vel_tol, torque_min, torque_max):
+        """
+        For each node id in `nodes`, generate config.json and push it over CAN
+        using ODrive-CAN/can_restore_config.py.
+        """
+        base_dir = os.path.dirname(os.path.abspath(__file__))  # .../can_control/control_gui
+        config_path = os.path.join(base_dir, "config.json")
+        endpoints_path = os.path.join(base_dir, "flat_endpoints.json")
+
+        for node_id in nodes:
+            print(f"\n⚙️  Generating config.json for node {node_id}")
+            cfg = self.make_config_json(
+                node_id=node_id,
+                vel_limit=vel_limit,
+                vel_tol=vel_tol,
+                torque_min=torque_min,
+                torque_max=torque_max,
+                save_path=config_path,
+            )
+
+            # ---- build command ----
+            cmd = [
+                "python3",
+                os.path.join(base_dir, "..", "ODrive-CAN", "can_restore_config.py"),
+                "--channel", "can0",
+                "--node-id", str(node_id),
+                "--endpoints-json", endpoints_path,
+                "--config", config_path,
+                "--save-config",
+            ]
+
+            print("🚀  Pushing config via:", " ".join(cmd))
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                print(result.stdout)
+                if result.stderr:
+                    print(result.stderr)
+                print(f"✅  Node {node_id} flashed successfully.")
+            except subprocess.CalledProcessError as e:
+                print(f"❌  Node {node_id} flash failed:")
+                print(e.stdout)
+                print(e.stderr)
+
+
+
+    def save_and_reboot_nodes(self, nodes):
+        """Send SAVE_CONFIG and REBOOT commands via CAN for the given node(s)."""
+        try:
+            bus = can.interface.Bus(channel='can0', bustype='socketcan')
+        except Exception as e:
+            print(f"⚠️ Failed to open CAN bus: {e}")
+            return
+
+        for node_id in nodes:
+            try:
+                base = (0x07 << 5) | node_id
+                save_id = base + 0x0C
+                reboot_id = base + 0x0D
+
+                # send SAVE_CONFIG
+                bus.send(can.Message(arbitration_id=save_id,
+                                     is_extended_id=False,
+                                     data=[]))
+                print(f"💾 Sent SAVE_CONFIG to node {node_id} (0x{save_id:X})")
+
+                # small delay between save and reboot
+                import time
+                time.sleep(0.2)
+
+                # send REBOOT
+                bus.send(can.Message(arbitration_id=reboot_id,
+                                     is_extended_id=False,
+                                     data=[]))
+                print(f"🔁 Sent REBOOT to node {node_id} (0x{reboot_id:X})")
+
+            except Exception as e:
+                print(f"❌ Error saving/rebooting node {node_id}: {e}")
+
+        bus.shutdown()
+        print("✅ Save/Reboot sequence complete.\n" + "-" * 60)
 
 
 

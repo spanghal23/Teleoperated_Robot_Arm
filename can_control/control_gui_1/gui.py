@@ -42,16 +42,32 @@ class ODriveGUI(ctk.CTk):
         main = ctk.CTkFrame(self)
         main.pack(padx=20, pady=10, fill="both", expand=True)
 
-        main.grid_columnconfigure(0, weight=1)   # left = 3× bigger
-        main.grid_columnconfigure(1, weight=1)   # right = smaller
+        RIGHT_W = 520  # pick what you like (e.g., 480–600)
 
-        # Left column (all control sections)
-        self.left_col = ctk.CTkFrame(main)
-        self.left_col.grid(row=0, column=0, sticky="nsew", padx=(0,10))
+        # Left takes remaining space, right is fixed
+        main.grid_columnconfigure(0, weight=1)             # left grows
+        main.grid_columnconfigure(1, weight=0, minsize=RIGHT_W)  # right fixed
 
-        # Right column (status panels)
-        self.right_col = ctk.CTkFrame(main)
-        self.right_col.grid(row=0, column=1, sticky="nsew", padx=(10,0))
+        # Left column uses tabs
+        self.tabview = ctk.CTkTabview(main)
+        self.tabview.grid(row=0, column=0, sticky="nsew", padx=(0,10))
+
+        # Create tabs
+        self.tab_pos = self.tabview.add("Control")
+        self.tab_vel = self.tabview.add("Velocity Config")
+
+        # Wrap each tab in a full-width frame (keeps tab width consistent)
+        self.left_col = ctk.CTkFrame(self.tab_pos)
+        self.left_col.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.vel_col = ctk.CTkFrame(self.tab_vel)
+        self.vel_col.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Right column (fixed width)
+        self.right_col = ctk.CTkFrame(main, width=RIGHT_W)
+        self.right_col.grid(row=0, column=1, sticky="ns", padx=(10,0))  # no 'ew' so it won't stretch
+        self.right_col.grid_propagate(False)  # keep width at RIGHT_W regardless of contents
+
 
 
         # ---------- 1. Connect ----------
@@ -66,7 +82,16 @@ class ODriveGUI(ctk.CTk):
         sec2.pack(fill="x", pady=10)
         ctk.CTkLabel(sec2, text="2. Enumerate ODrives (discover nodes):", font=self.font_header).pack(side="left", padx=10)
         ctk.CTkButton(sec2, text="Enumerate", command=self.threaded(self.enumerate_nodes), font=self.font_button).pack(side="left", padx=5)
-        ctk.CTkButton(sec2, text="(Optional) Calibrate", command=self.threaded(self.calibrate_all), font=self.font_button).pack(side="left", padx=5)
+
+        ctk.CTkLabel(sec2, text="(Optional) Calibrate:", font=self.font_header).pack(side="left", padx=10)
+
+        for node_id in [1, 2, 3]:
+            ctk.CTkButton(
+                sec2,
+                text=f"Calibrate Node {node_id}",
+                command=self.threaded(lambda nid=node_id: self.calibrate_one(nid)),
+                font=self.font_button
+            ).pack(side="left", padx=5)
 
         # ---------- 3. Axis State ----------   
         sec3 = ctk.CTkFrame(self.left_col)
@@ -246,6 +271,107 @@ class ODriveGUI(ctk.CTk):
             self.feedback_labels[i] = lbl
 
 
+
+
+
+        # ---------- Velocity Config TAB ----------
+        sec_vel = ctk.CTkFrame(self.vel_col)
+        sec_vel.pack(fill="x", pady=10)
+
+        ctk.CTkLabel(sec_vel, text="Velocity Control Parameters:", font=self.font_header)\
+            .pack(anchor="w", padx=10, pady=(5,10))
+
+        # === per-node selector ===
+        node_sel_frame = ctk.CTkFrame(sec_vel)
+        node_sel_frame.pack(anchor="w", padx=20, pady=(0,10))
+
+        ctk.CTkLabel(node_sel_frame, text="Select Node:", font=self.font_label)\
+            .pack(side="left", padx=(0,5))
+        self.node_choice = ctk.CTkOptionMenu(node_sel_frame, values=["All", "0", "1", "2"])
+        self.node_choice.set("All")
+        self.node_choice.pack(side="left")
+
+        # === parameter inputs ===
+        params = [
+            ("Vel Limit [turn/s]", "vel_limit", 3.0),
+            ("Vel Limit Tolerance", "vel_limit_tolerance", 1.67),
+            ("Torque Soft Min", "torque_soft_min", -1e9),
+            ("Torque Soft Max", "torque_soft_max", 1e9),
+        ]
+        self.vel_param_entries = {}
+
+        form = ctk.CTkFrame(sec_vel)
+        form.pack(anchor="w", padx=20, pady=10)
+
+        for i, (label, key, default) in enumerate(params):
+            ctk.CTkLabel(form, text=label, font=self.font_label, width=200, anchor="w")\
+                .grid(row=i, column=0, padx=5, pady=5, sticky="w")
+            entry = ctk.CTkEntry(form, width=120)
+            entry.insert(0, str(default))
+            entry.grid(row=i, column=1, padx=10, pady=5)
+            self.vel_param_entries[key] = entry
+
+        # === Buttons ===
+        btn_frame = ctk.CTkFrame(sec_vel)
+        btn_frame.pack(fill="x", padx=10, pady=15)
+
+        ctk.CTkButton(btn_frame, text="Push Config", 
+                    command=self.threaded(self.push_vel_config), font=self.font_button)\
+                    .pack(side="left", padx=5)
+
+        ctk.CTkButton(btn_frame, text="Save + Reboot", 
+                    command=self.threaded(self.save_and_reboot), font=self.font_button)\
+                    .pack(side="left", padx=5)
+
+        ctk.CTkButton(btn_frame, text="Calibrate Selected", 
+                    command=self.threaded(self.calibrate_selected_node), font=self.font_button)\
+                    .pack(side="left", padx=5)
+
+
+    def push_vel_config(self):
+        """Generate and push configs for selected or all nodes."""
+        node_sel = self.node_choice.get()
+        vals = {k: float(v.get()) for k, v in self.vel_param_entries.items()}
+
+        if node_sel == "All":
+            nodes = getattr(self.mgr, "nodes", [0,1,2])
+        else:
+            nodes = [int(node_sel)]
+
+        self.mgr.flash_config_over_can(
+            nodes=nodes,
+            vel_limit=vals["vel_limit"],
+            vel_tol=vals["vel_limit_tolerance"],
+            torque_min=vals["torque_soft_min"],
+            torque_max=vals["torque_soft_max"],
+        )
+
+    def save_and_reboot(self):
+        """Send SAVE_CONFIG and REBOOT over CAN."""
+        node_sel = self.node_choice.get()
+
+        # determine which nodes
+        if node_sel == "All":
+            nodes = getattr(self.mgr, "nodes", [0,1,2])
+        else:
+            nodes = [int(node_sel)]
+
+        print(f"💾 Saving + rebooting node(s): {nodes}")
+        self.mgr.save_and_reboot_nodes(nodes)
+
+    def calibrate_selected_node(self):
+        """Calibrate selected or all nodes using existing calibrate_one()."""
+        node_sel = self.node_choice.get()
+        if node_sel == "All":
+            print("🧭 Calibrating ALL nodes...")
+            for n in getattr(self.mgr, "nodes", []):
+                self.calibrate_one(n)
+        else:
+            node_id = int(node_sel)
+            print(f"🧭 Calibrating node {node_id}...")
+            self.calibrate_one(node_id)
+
+
     # ============================================================
     # threaded wrapper
     # ============================================================
@@ -289,9 +415,10 @@ class ODriveGUI(ctk.CTk):
         nodes_text = ", ".join(f"Node {n}" for n in self.mgr.nodes)
         self.enum_status.configure(text=f"Enumerated: {nodes_text}", text_color="gray")
 
-    def calibrate_all(self):
-        for n in self.mgr.nodes:
-            self.mgr.calibrate_node(n)
+    def calibrate_one(self, node_id):
+        """Calibrate a specific node."""
+        print(f"⚙️ Calibrating node {node_id}...")
+        self.mgr.calibrate_node(node_id)
 
     def send_positions(self):
         """Move to absolute position in the zeroed frame: target_abs = zero + delta."""
