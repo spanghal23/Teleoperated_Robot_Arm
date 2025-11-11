@@ -23,7 +23,7 @@ class ODriveGUI(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("ODrive CAN GUI (Linux Only)")
-        self.geometry("1600x800+200+100")
+        self.geometry("1800x800+75+100")
         ctk.set_default_color_theme("blue")
         ctk.set_widget_scaling(1.1)
 
@@ -293,8 +293,11 @@ class ODriveGUI(ctk.CTk):
 
         # === parameter inputs ===
         params = [
-            ("Vel Limit [turn/s]", "vel_limit", 3.0),
-            ("Vel Limit Tolerance", "vel_limit_tolerance", 1.67),
+            ("Vel Limit [turn/s]", "vel_limit", 2.0),
+            ("Vel Limit Tolerance", "vel_limit_tolerance", 1e9),
+            ("Position Gain (pos_gain)", "pos_gain", ""),  # no default
+            ("Velocity Gain (vel_gain)", "vel_gain", ""),  # no default
+            ("Velocity Integrator Gain (vel_integrator_gain)", "vel_integrator_gain", ""),  # no default
             ("Torque Soft Min", "torque_soft_min", -1e9),
             ("Torque Soft Max", "torque_soft_max", 1e9),
         ]
@@ -331,19 +334,33 @@ class ODriveGUI(ctk.CTk):
     def push_vel_config(self):
         """Generate and push configs for selected or all nodes."""
         node_sel = self.node_choice.get()
-        vals = {k: float(v.get()) for k, v in self.vel_param_entries.items()}
-
         if node_sel == "All":
-            nodes = getattr(self.mgr, "nodes", [0,1,2])
+            nodes = getattr(self.mgr, "nodes", [0, 1, 2])
         else:
             nodes = [int(node_sel)]
 
+        vals = {}
+        for k, entry in self.vel_param_entries.items():
+            raw = entry.get().strip()
+            if raw == "":
+                vals[k] = None
+            else:
+                try:
+                    vals[k] = float(raw)
+                except ValueError:
+                    print(f"⚠️ Invalid value for {k}: '{raw}' (ignored)")
+                    vals[k] = None
+
+        # push config over CAN
         self.mgr.flash_config_over_can(
             nodes=nodes,
             vel_limit=vals["vel_limit"],
             vel_tol=vals["vel_limit_tolerance"],
             torque_min=vals["torque_soft_min"],
             torque_max=vals["torque_soft_max"],
+            pos_gain=vals.get("pos_gain"),
+            vel_gain=vals.get("vel_gain"),
+            vel_int_gain=vals.get("vel_integrator_gain"),
         )
 
     def save_and_reboot(self):

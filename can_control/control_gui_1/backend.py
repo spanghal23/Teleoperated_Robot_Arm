@@ -294,14 +294,24 @@ class ODriveManager:
 
 
 
-    def make_config_json(self, node_id: int, vel_limit: float, vel_tol: float,
-                        torque_min: float, torque_max: float, save_path: str = None):
+    def make_config_json(
+        self,
+        node_id: int,
+        vel_limit: float,
+        vel_tol: float,
+        torque_min: float,
+        torque_max: float,
+        pos_gain: float = None,
+        vel_gain: float = None,
+        vel_int_gain: float = None,
+        save_path: str = None
+    ):
         """
-        Generate an ODrive config JSON for a given node with custom velocity/torque limits.
-        If save_path is given, write it to file. Otherwise, return the dict.
+        Generate an ODrive config JSON for a given node with custom velocity/torque limits
+        and optional controller gains. If save_path is given, write it to file; otherwise
+        return the dict.
         """
 
-        # ---- base template ----
         cfg = {
             "config.dc_bus_overvoltage_trip_level": 36,
             "config.dc_bus_undervoltage_trip_level": 10.5,
@@ -310,65 +320,107 @@ class ODriveManager:
             "config.brake_resistor0.enable": True,
             "config.brake_resistor0.resistance": 2,
 
-            f"axis{node_id}.config.motor.motor_type": 0,
-            f"axis{node_id}.config.motor.pole_pairs": 20,
-            f"axis{node_id}.config.motor.torque_constant": 0.09188888888888888,
-            f"axis{node_id}.config.motor.current_soft_max": 22,
-            f"axis{node_id}.config.motor.current_hard_max": 38.6,
-            f"axis{node_id}.config.motor.calibration_current": 18,
-            f"axis{node_id}.config.motor.resistance_calib_max_voltage": 5,
+            "axis0.config.motor.motor_type": 0,
+            "axis0.config.motor.pole_pairs": 20,
+            "axis0.config.motor.torque_constant": 0.09188888888888888,
+            "axis0.config.motor.current_soft_max": 22,
+            "axis0.config.motor.current_hard_max": 38.6,
+            "axis0.config.motor.calibration_current": 18,
+            "axis0.config.motor.resistance_calib_max_voltage": 5,
 
-            f"axis{node_id}.config.calibration_lockin.current": 18,
-            f"axis{node_id}.motor.motor_thermistor.config.enabled": False,
+            "axis0.config.calibration_lockin.current": 18,
+            "axis0.motor.motor_thermistor.config.enabled": False,
 
-            f"axis{node_id}.controller.config.control_mode": 3,
-            f"axis{node_id}.controller.config.input_mode": 1,
-            f"axis{node_id}.controller.config.vel_limit": vel_limit,
-            f"axis{node_id}.controller.config.vel_limit_tolerance": vel_tol,
+            "axis0.controller.config.control_mode": 3,
+            "axis0.controller.config.input_mode": 1,
+            "axis0.controller.config.vel_limit": vel_limit,
+            "axis0.controller.config.vel_limit_tolerance": vel_tol,
 
-            f"axis{node_id}.config.torque_soft_min": torque_min,
-            f"axis{node_id}.config.torque_soft_max": torque_max,
+            "axis0.config.torque_soft_min": torque_min,
+            "axis0.config.torque_soft_max": torque_max,
 
             "can.config.protocol": 1,
             "can.config.baud_rate": 250000,
 
-            f"axis{node_id}.config.can.node_id": node_id,
-            f"axis{node_id}.config.can.heartbeat_msg_rate_ms": 100,
-            f"axis{node_id}.config.can.encoder_msg_rate_ms": 10,
-            f"axis{node_id}.config.can.iq_msg_rate_ms": 10,
-            f"axis{node_id}.config.can.torques_msg_rate_ms": 10,
-            f"axis{node_id}.config.can.error_msg_rate_ms": 10,
-            f"axis{node_id}.config.can.temperature_msg_rate_ms": 10,
-            f"axis{node_id}.config.can.bus_voltage_msg_rate_ms": 10,
+            "axis0.config.can.node_id": node_id,
+            "axis0.config.can.heartbeat_msg_rate_ms": 100,
+            "axis0.config.can.encoder_msg_rate_ms": 10,
+            "axis0.config.can.iq_msg_rate_ms": 10,
+            "axis0.config.can.torques_msg_rate_ms": 10,
+            "axis0.config.can.error_msg_rate_ms": 10,
+            "axis0.config.can.temperature_msg_rate_ms": 10,
+            "axis0.config.can.bus_voltage_msg_rate_ms": 10,
 
-            f"axis{node_id}.config.enable_watchdog": False,
-            f"axis{node_id}.config.load_encoder": 13,
-            f"axis{node_id}.config.commutation_encoder": 13,
+            "axis0.config.enable_watchdog": False,
+            "axis0.config.load_encoder": 13,
+            "axis0.config.commutation_encoder": 13,
+
             "config.enable_uart_a": False
         }
 
+        # --- optional controller gains ---
+        if pos_gain is not None:
+            cfg["axis0.controller.config.pos_gain"] = pos_gain
+        if vel_gain is not None:
+            cfg["axis0.controller.config.vel_gain"] = vel_gain
+        if vel_int_gain is not None:
+            cfg["axis0.controller.config.vel_integrator_gain"] = vel_int_gain
 
+        # --- save to file if requested ---
+        if save_path:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            with open(save_path, "w") as f:
+                json.dump(cfg, f, indent=2)
+            print(f"💾  Wrote {save_path} for node {node_id}")
 
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        with open(save_path, "w") as f:
-            json.dump(cfg, f, indent=2)
-        print(f"💾  Wrote {save_path} for node {node_id}")
         return cfg
 
 
 
-    def flash_config_over_can(self, nodes, vel_limit, vel_tol, torque_min, torque_max):
+
+    def flash_config_over_can(self, nodes, vel_limit, vel_tol, torque_min, torque_max,
+                          pos_gain=None, vel_gain=None, vel_int_gain=None):
         """
         For each node id in `nodes`, generate config.json and push it over CAN
         using ODrive-CAN/can_restore_config.py.
         """
-        base_dir = os.path.dirname(os.path.abspath(__file__))  # .../can_control/control_gui
+        import os, subprocess
+
+        # --- directory layout ---
+        base_dir = os.path.dirname(os.path.abspath(__file__))                 # .../can_control/control_gui_1
+        project_root = os.path.abspath(os.path.join(base_dir, "..", ".."))    # .../me6705_final_project
+        can_control_dir = os.path.join(project_root, "can_control")
+        odrive_can_dir = os.path.join(project_root, "ODrive-CAN")
+
+        # --- critical paths ---
+        can_restore_path = os.path.join(odrive_can_dir, "can_restore_config.py")
         config_path = os.path.join(base_dir, "config.json")
-        endpoints_path = os.path.join(base_dir, "flat_endpoints.json")
+
+        # endpoints lives in can_control/, not control_gui_1
+        endpoints_candidates = [
+            os.path.join(can_control_dir, "flat_endpoints.json"),
+            os.path.join(base_dir, "flat_endpoints.json"),
+        ]
+        endpoints_path = next((p for p in endpoints_candidates if os.path.isfile(p)), None)
+
+        # --- sanity checks ---
+        if not os.path.isfile(can_restore_path):
+            print(f"❌ Missing can_restore_config.py at: {can_restore_path}")
+            return
+        if endpoints_path is None:
+            print("❌ Could not find flat_endpoints.json. Tried:")
+            for p in endpoints_candidates:
+                print("   -", p)
+            return
+
+        print("\n📂 Using paths:")
+        print("   can_restore_config.py:", can_restore_path)
+        print("   endpoints JSON       :", endpoints_path)
+        print("   config JSON (temp)   :", config_path, "\n")
 
         for node_id in nodes:
-            print(f"\n⚙️  Generating config.json for node {node_id}")
-            cfg = self.make_config_json(
+            print(f"⚙️  Generating config.json for node {node_id}")
+            self.make_config_json(
                 node_id=node_id,
                 vel_limit=vel_limit,
                 vel_tol=vel_tol,
@@ -377,10 +429,9 @@ class ODriveManager:
                 save_path=config_path,
             )
 
-            # ---- build command ----
             cmd = [
                 "python3",
-                os.path.join(base_dir, "..", "ODrive-CAN", "can_restore_config.py"),
+                can_restore_path,
                 "--channel", "can0",
                 "--node-id", str(node_id),
                 "--endpoints-json", endpoints_path,
@@ -388,18 +439,23 @@ class ODriveManager:
                 "--save-config",
             ]
 
-            print("🚀  Pushing config via:", " ".join(cmd))
+            print(f"🚀  Flashing Node {node_id} via CAN…")
+            print("   ↳", " ".join(cmd))
+
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-                print(result.stdout)
-                if result.stderr:
-                    print(result.stderr)
-                print(f"✅  Node {node_id} flashed successfully.")
+                if result.stdout.strip():
+                    print(result.stdout.strip())
+                if result.stderr.strip():
+                    print("stderr:", result.stderr.strip())
+                print(f"✅  Node {node_id} flashed successfully.\n")
             except subprocess.CalledProcessError as e:
                 print(f"❌  Node {node_id} flash failed:")
-                print(e.stdout)
-                print(e.stderr)
-
+                if e.stdout:
+                    print("stdout:", e.stdout.strip())
+                if e.stderr:
+                    print("stderr:", e.stderr.strip())
+                print()
 
 
     def save_and_reboot_nodes(self, nodes):
