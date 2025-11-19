@@ -4,10 +4,11 @@ from typing import Dict, Optional, List, Tuple
 
 import pybullet as p
 import pybullet_data
+import time
 
 # ===== CONFIG (no physics) =====
-TIMESTEP     = 1.0 / 240.0
-PRINT_HZ     = 10.0
+TIMESTEP     = 1.0 / 500.0
+PRINT_HZ     = 50.0
 CAM_INDEX    = 0
 SHOW_CV      = True          # show the webcam window from CVCode.py
 USE_PROCESS  = True          # run CV in a separate process (reliable on Windows)
@@ -51,6 +52,33 @@ INVERT_ELBOW     = False
 # ====================================
 
 os.environ.setdefault("GLOG_minloglevel", "2")
+
+# ---------- WINODW PLACEMENT FUNCTION ----------
+
+def tile_pybullet_left_half():
+    """Put the PyBullet GUI on the left half of the primary screen."""
+    try:
+        import pygetwindow as gw
+        import ctypes
+
+        # Screen size
+        user32 = ctypes.windll.user32
+        screen_w = user32.GetSystemMetrics(0)
+        screen_h = user32.GetSystemMetrics(1)
+
+        # Find the PyBullet window by title
+        wins = [w for w in gw.getAllWindows() if "PyBullet" in w.title or "Bullet" in w.title]
+        if not wins:
+            print("[WARN] Could not find PyBullet window to position.")
+            return
+
+        w = wins[0]
+        w.restore()
+        w.moveTo(0, 0)
+        w.resizeTo(screen_w // 2, screen_h)
+        print("[INFO] Tiled PyBullet window on left half.")
+    except Exception as e:
+        print("[WARN] Failed to tile PyBullet window:", e)
 
 # ---------- TOP-LEVEL CV WORKER (picklable on Windows) ----------
 def cv_worker(angle_queue, cam_index: int, show: bool):
@@ -418,6 +446,7 @@ def main():
         # Step just to refresh the viewer (no physics happening)
         p.stepSimulation()
         time.sleep(TIMESTEP)
+        tile_pybullet_left_half()
 
     print("[INFO] Disconnected. Bye.")
 

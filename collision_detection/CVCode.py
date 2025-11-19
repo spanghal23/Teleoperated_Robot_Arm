@@ -4,6 +4,7 @@ from typing import Callable, Dict, Optional
 
 import cv2
 import mediapipe as mp
+import ctypes
 
 # ---------- math helpers ----------
 def _angle_3pt(a, b, c):
@@ -40,7 +41,8 @@ def read_webcam_fast(
     """
     Low-latency pose angles reader.
     - Calls `on_angles(dict)` each frame (latest only).
-    - If `show=True`, draws a tiny HUD (fast).
+    - If `show=True`, draws a tiny HUD (fast) and tiles the window.
+    - If NO pose is detected for >= 3 seconds, sends all joint angles = 0.
     """
     mp_pose = mp.solutions.pose
 
@@ -53,11 +55,29 @@ def read_webcam_fast(
     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    cap.set(cv2.CAP_PROP_FPS, 30)
+    cap.set(cv2.CAP_PROP_FPS, 60)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # some backends ignore this
 
     if show:
         cv2.namedWindow("Pose Tracking", cv2.WINDOW_NORMAL)
+
+        # --- Tile Pose Tracking window to the RIGHT half of the primary screen ---
+        try:
+            user32 = ctypes.windll.user32
+            screen_w = user32.GetSystemMetrics(0)
+            screen_h = user32.GetSystemMetrics(1)
+
+            win_w = screen_w // 2
+            win_h = screen_h
+
+            # Resize to half the screen width and full height
+            cv2.resizeWindow("Pose Tracking", win_w, win_h)
+            # Move to start at mid-screen (right half)
+            cv2.moveWindow("Pose Tracking", screen_w // 2, 0)
+
+            print("[INFO] Tiled 'Pose Tracking' window to right half of screen.")
+        except Exception as e:
+            print("[WARN] Could not tile 'Pose Tracking' window:", e)
 
     pose = mp_pose.Pose(
         static_image_mode=False,
@@ -69,6 +89,8 @@ def read_webcam_fast(
     )
 
     thr = 0.7  # visibility threshold
+    NO_POSE_TIMEOUT = 3.0  # seconds
+    last_pose_time = time.time()  # last time we had a valid pose
 
     try:
         while True:
@@ -81,14 +103,17 @@ def read_webcam_fast(
 
             # Downscale for faster inference (angles are scale invariant)
             if process_scale != 1.0:
-                small = cv2.resize(frame, None, fx=process_scale, fy=process_scale, interpolation=cv2.INTER_AREA)
+                small = cv2.resize(frame, None, fx=process_scale, fy=process_scale,
+                                   interpolation=cv2.INTER_AREA)
             else:
                 small = frame
 
             rgb_small = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
             res = pose.process(rgb_small)
 
+            now = time.time()
             angles: Dict[str, float] = {}
+            pose_ok = False
 
             if res and res.pose_landmarks:
                 lms = res.pose_landmarks.landmark
@@ -102,23 +127,48 @@ def read_webcam_fast(
                 Lh, Rh     = pt(23), pt(24)
                 Lt, Rt     = pt(21), pt(22)  # if you want wrist angles
 
-                angles["L_elbow"]    = _angle_3pt(Ls, Le, Lw) if (vis(11) and vis(13) and vis(15)) else 0.0
-                angles["L_shoulder"] = _angle_3pt(Lh, Ls, Le) if (vis(23) and vis(11) and vis(13)) else 0.0
-                angles["R_elbow"]    = _angle_3pt(Rs, Re, Rw) if (vis(12) and vis(14) and vis(16)) else 0.0
-                angles["R_shoulder"] = _angle_3pt(Rh, Rs, Re) if (vis(24) and vis(12) and vis(14)) else 0.0
-                # Example if needed:
-                # angles["L_wrist"] = _angle_3pt(Le, Lw, Lt) if (vis(13) and vis(15) and vis(21)) else 0.0
+                # Only mark pose_ok if at least one of these is confidently visible
+                has_any = False
 
-            if on_angles:
+                if vis(11) and vis(13) and vis(15):
+                    angles["L_elbow"] = _angle_3pt(Ls, Le, Lw)
+                    has_any = True
+                if vis(23) and vis(11) and vis(13):
+                    angles["L_shoulder"] = _angle_3pt(Lh, Ls, Le)
+                    has_any = True
+                if vis(12) and vis(14) and vis(16):
+                    angles["R_elbow"] = _angle_3pt(Rs, Re, Rw)
+                    has_any = True
+                if vis(24) and vis(12) and vis(14):
+                    angles["R_shoulder"] = _angle_3pt(Rh, Rs, Re)
+                    has_any = True
+
+                if has_any:
+                    pose_ok = True
+                    last_pose_time = now
+
+            # If no valid pose and we've been "blind" for >= 3 seconds, command zeros
+            if not pose_ok and (now - last_pose_time) >= NO_POSE_TIMEOUT:
+                angles = {
+                    "L_elbow":    0.0,
+                    "L_shoulder": 0.0,
+                    "R_elbow":    90.0, # neutral arms-down position
+                    "R_shoulder": 90.0, # neutral arms-down position
+                }
+
+            if on_angles and angles:
                 # Hand off immediately (let the consumer decide control rate)
                 on_angles(angles)
 
             if show:
                 # Very light HUD (fast; skip skeleton drawing to save time)
-                text = f"L(elb:{angles.get('L_elbow',0):.0f}, shd:{angles.get('L_shoulder',0):.0f})  " \
-                       f"R(elb:{angles.get('R_elbow',0):.0f}, shd:{angles.get('R_shoulder',0):.0f})"
+                text = (
+                    f"L(elb:{angles.get('L_elbow',0):.0f}, shd:{angles.get('L_shoulder',0):.0f})  "
+                    f"R(elb:{angles.get('R_elbow',0):.0f}, shd:{angles.get('R_shoulder',0):.0f})"
+                )
                 img = frame
-                cv2.putText(img, text, (12, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
+                cv2.putText(img, text, (12, 32),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
                 cv2.imshow("Pose Tracking", img)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
