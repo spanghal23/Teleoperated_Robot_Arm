@@ -30,6 +30,10 @@ class ODriveGUI(ctk.CTk):
         self.latest = {}  # cache
         self.status_running = False # bg poller flag    
 
+        # === keyboard jogging state ===
+        self.jog_target = {0: 0.0, 1: 0.0, 2: 0.0}
+        self.keyboard_enabled = False
+
         self.font_header = ("Roboto", 14)
         self.font_button = ("Roboto", 14)  # , 'bold'
         self.font_label = ("Roboto", 14)
@@ -329,6 +333,17 @@ class ODriveGUI(ctk.CTk):
         ctk.CTkButton(btn_frame, text="Calibrate Selected", 
                     command=self.threaded(self.calibrate_selected_node), font=self.font_button)\
                     .pack(side="left", padx=5)
+        
+
+
+
+        # keyboard handlers
+        self.keys_down = set()
+        self.bind_all("<KeyPress>", self.on_key_press)
+        self.bind_all("<KeyRelease>", self.on_key_release)
+
+        # jog loop
+        self.after(30, self.keyboard_control_loop)
 
 
     def push_vel_config(self):
@@ -500,6 +515,20 @@ class ODriveGUI(ctk.CTk):
             for n in getattr(self.mgr, "nodes", []):
                 self.mgr.set_axis_state(n, state)
                 print(f"✅ Node {n} set to state {state}")
+
+
+            ## Keyboard jogging ish
+
+            # >>> ADD THIS <<<  
+            if state == 8:  # closed-loop
+                # initialize jog targets to current absolute positions
+                for n in getattr(self.mgr, "nodes", []):
+                    pos, vel = self.mgr.read_feedback(n)
+                    if pos is not None:
+                        self.jog_target[n] = pos
+                self.keyboard_enabled = True
+                print("Keyboard jogging enabled and targets initialized.")
+
         except Exception as e:
             print(f"⚠️ Failed to set axis state: {e}")
 
@@ -804,3 +833,46 @@ class ODriveGUI(ctk.CTk):
         import threading
         threading.Thread(target=loop, daemon=True).start()
         print("🟢 CAN listener thread started.")
+
+
+
+    def on_key_press(self, event):
+        self.keys_down.add(event.keysym)
+
+    def on_key_release(self, event):
+        if event.keysym in self.keys_down:
+            self.keys_down.remove(event.keysym)
+
+    def keyboard_control_loop(self):
+        if self.keyboard_enabled and getattr(self.mgr, "bus", None):
+
+            shift = ("Shift_L" in self.keys_down or "Shift_R" in self.keys_down)
+
+            # jogging increment - tune if not smooth
+            delta = 0.01  # turns per tick
+
+            if shift:
+                # node 0
+                if "Y" in self.keys_down:
+                    self.jog_target[0] += delta
+                if "H" in self.keys_down:
+                    self.jog_target[0] -= delta
+
+                # node 1
+                if "U" in self.keys_down:
+                    self.jog_target[1] += delta
+                if "J" in self.keys_down:
+                    self.jog_target[1] -= delta
+
+                # node 2
+                if "I" in self.keys_down:
+                    self.jog_target[2] += delta
+                if "K" in self.keys_down:
+                    self.jog_target[2] -= delta
+
+                # send updated position to all nodes
+                for n in getattr(self.mgr, "nodes", []):
+                    self.mgr.set_position(n, self.jog_target[n])
+
+        # schedule again
+        self.after(30, self.keyboard_control_loop)    # first arg is time in between in ms 
