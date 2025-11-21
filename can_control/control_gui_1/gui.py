@@ -10,12 +10,17 @@ class TextRedirector(io.TextIOBase):
         self.text_widget = text_widget
         self.tag = tag
     def write(self, s):
+        self.text_widget.configure(state="normal")
         if self.tag == "stderr":
             self.text_widget.insert("end", s, "error")
         else:
             self.text_widget.insert("end", s)
         self.text_widget.see("end")
+        self.text_widget.update_idletasks()   # force redraw
+        self.text_widget.configure(state="disabled")
     def flush(self): ...
+
+    
     
 
 # ========== GUI ==========
@@ -89,7 +94,7 @@ class ODriveGUI(ctk.CTk):
 
         ctk.CTkLabel(sec2, text="(Optional) Calibrate:", font=self.font_header).pack(side="left", padx=10)
 
-        for node_id in [1, 2, 3]:
+        for node_id in [0, 1, 2]:
             ctk.CTkButton(
                 sec2,
                 text=f"Calibrate Node {node_id}",
@@ -157,6 +162,28 @@ class ODriveGUI(ctk.CTk):
             btn.grid(row=0, column=i+1, padx=10)
             self.zero_buttons[i] = btn
 
+        btn_all = ctk.CTkButton(
+            sec4,
+            text="Zero All",
+            fg_color="#1650CC",      # blue
+            hover_color="#1650CC",   # darker blue
+            font=self.font_button,
+            command=self.threaded(self.zero_all)
+        )
+        btn_all.grid(row=0, column=5, padx=10)   # same row as the others
+
+        go_home_btn = ctk.CTkButton(
+            sec4,
+            text="Go Home",
+            fg_color="#7D3C98",    # purple
+            hover_color="#693284",
+            font=self.font_button,
+            command=self.threaded(self.go_home)
+        )
+        go_home_btn.grid(row=0, column=6, padx=10)
+
+
+
         # ---------- 5. Position Control ----------
         sec5 = ctk.CTkFrame(self.left_col)
         sec5.pack(fill="x", pady=10)
@@ -195,6 +222,11 @@ class ODriveGUI(ctk.CTk):
         self.log_box = ctk.CTkTextbox(self, width=800, height=350)
         self.log_box.pack(padx=20, pady=10, fill="x")
         self.log_box.tag_config("error", foreground="red")
+
+        # make it read-only for user typing
+        self.log_box.configure(state="disabled")
+        self.log_box.bind("<Key>", lambda e: "break")  # ignore keypresses in this widget
+
         sys.stdout = TextRedirector(self.log_box, "stdout")
         sys.stderr = TextRedirector(self.log_box, "stderr")
 
@@ -291,17 +323,46 @@ class ODriveGUI(ctk.CTk):
 
         ctk.CTkLabel(node_sel_frame, text="Select Node:", font=self.font_label)\
             .pack(side="left", padx=(0,5))
-        self.node_choice = ctk.CTkOptionMenu(node_sel_frame, values=["All", "0", "1", "2"])
-        self.node_choice.set("All")
-        self.node_choice.pack(side="left")
+        
+        # --- horizontal 4-option tab selector ---
+        self.node_choice_val = "All"
+
+        tab_container = ctk.CTkFrame(node_sel_frame, fg_color="transparent")
+        tab_container.pack(side="left", padx=5)
+
+        self.node_tab_buttons = {}
+
+        def set_node_choice(val):
+            self.node_choice_val = val
+            for key, b in self.node_tab_buttons.items():
+                if key == val:
+                    b.configure(fg_color="#1f6aa5", text_color="white")  # selected
+                else:
+                    b.configure(fg_color="#2b2b2b", text_color="gray80")  # unselected
+
+        for opt in ["All", "0", "1", "2"]:
+            btn = ctk.CTkButton(
+                tab_container,
+                text=opt,
+                width=50,
+                height=28,
+                corner_radius=6,
+                fg_color="#2b2b2b",
+                text_color="gray80",
+                command=lambda o=opt: set_node_choice(o),
+            )
+            btn.pack(side="left", padx=3)
+            self.node_tab_buttons[opt] = btn
+
+        set_node_choice("All")
 
         # === parameter inputs ===
         params = [
             ("Vel Limit [turn/s]", "vel_limit", 2.0),
             ("Vel Limit Tolerance", "vel_limit_tolerance", 1e9),
-            ("Position Gain (pos_gain)", "pos_gain", ""),  # no default
-            ("Velocity Gain (vel_gain)", "vel_gain", ""),  # no default
-            ("Velocity Integrator Gain (vel_integrator_gain)", "vel_integrator_gain", ""),  # no default
+            ("Position Gain (pos_gain)", "pos_gain", "250"),  # no default
+            ("Velocity Gain (vel_gain)", "vel_gain", "0.375"),  # no default
+            ("Velocity Integrator Gain (vel_integrator_gain)", "vel_integrator_gain", "0.9"),  # no default
             ("Torque Soft Min", "torque_soft_min", -1e9),
             ("Torque Soft Max", "torque_soft_max", 1e9),
         ]
@@ -317,6 +378,8 @@ class ODriveGUI(ctk.CTk):
             entry.insert(0, str(default))
             entry.grid(row=i, column=1, padx=10, pady=5)
             self.vel_param_entries[key] = entry
+        
+        
 
         # === Buttons ===
         btn_frame = ctk.CTkFrame(sec_vel)
@@ -348,7 +411,7 @@ class ODriveGUI(ctk.CTk):
 
     def push_vel_config(self):
         """Generate and push configs for selected or all nodes."""
-        node_sel = self.node_choice.get()
+        node_sel = self.node_choice_val
         if node_sel == "All":
             nodes = getattr(self.mgr, "nodes", [0, 1, 2])
         else:
@@ -356,6 +419,9 @@ class ODriveGUI(ctk.CTk):
 
         vals = {}
         for k, entry in self.vel_param_entries.items():
+            raw = entry.get()
+            print(f"[DEBUG] {k} raw='{raw}' repr={repr(raw)}")
+            
             raw = entry.get().strip()
             if raw == "":
                 vals[k] = None
@@ -380,7 +446,7 @@ class ODriveGUI(ctk.CTk):
 
     def save_and_reboot(self):
         """Send SAVE_CONFIG and REBOOT over CAN."""
-        node_sel = self.node_choice.get()
+        node_sel = self.node_choice_val
 
         # determine which nodes
         if node_sel == "All":
@@ -393,7 +459,7 @@ class ODriveGUI(ctk.CTk):
 
     def calibrate_selected_node(self):
         """Calibrate selected or all nodes using existing calibrate_one()."""
-        node_sel = self.node_choice.get()
+        node_sel = self.node_choice_val
         if node_sel == "All":
             print("🧭 Calibrating ALL nodes...")
             for n in getattr(self.mgr, "nodes", []):
@@ -495,6 +561,39 @@ class ODriveGUI(ctk.CTk):
         for n in self.mgr.nodes:
             self.mgr.clear_errors_and_idle(n)
 
+
+    def go_home(self):
+        """Send all enumerated nodes to their relative home: abs_target = zero_offsets[node]."""
+        nodes = getattr(self.mgr, "nodes", [])
+
+        if not nodes:
+            print("⚠️ No nodes enumerated. Cannot go home.")
+            return
+
+        print("🏠 Go Home command issued...")
+
+        for n in nodes:
+            try:
+                # get the stored zero; if missing, fall back to latest pos
+                zero = self.zero_offsets.get(n)
+                if zero is None:
+                    zero = self.latest.get(n, {}).get("pos", 0.0)
+                    self.zero_offsets[n] = zero
+                    print(f"ℹ️ Node {n} had no zero; using cached pos={zero:.3f}")
+
+                print(f"   → Node {n}: moving to home (abs_target={zero:.3f})")
+                self.mgr.set_position(n, zero)
+
+                # update the cached latest position
+                self.latest.setdefault(n, {}).update({
+                    "pos": zero,
+                    "updated": time.time(),
+                })
+
+            except Exception as e:
+                print(f"⚠️ Failed to home node {n}: {e}")
+
+
     def shutdown_can(self):
         self.mgr.shutdown_can_interface()
         self.conn_status.configure(text="🔌 Disconnected", text_color="gray")
@@ -520,14 +619,33 @@ class ODriveGUI(ctk.CTk):
             ## Keyboard jogging ish
 
             # >>> ADD THIS <<<  
-            if state == 8:  # closed-loop
-                # initialize jog targets to current absolute positions
-                for n in getattr(self.mgr, "nodes", []):
-                    pos, vel = self.mgr.read_feedback(n)
-                    if pos is not None:
+            # --- Keyboard jogging init (safe) ---
+            if state == 8:  # entering closed loop
+                print("Entering closed-loop, waiting for stable feedback before enabling jogging...")
+
+                def init_jog_targets_safely():
+                    ready = True
+                    for n in getattr(self.mgr, "nodes", []):
+                        pos, vel = self.mgr.read_feedback(n)
+                        if pos is None:
+                            ready = False
+                            break
+
+                    if not ready:
+                        # try again in 50 ms
+                        self.after(50, init_jog_targets_safely)
+                        return
+
+                    # we now have valid feedback
+                    for n in getattr(self.mgr, "nodes", []):
+                        pos, vel = self.mgr.read_feedback(n)
                         self.jog_target[n] = pos
-                self.keyboard_enabled = True
-                print("Keyboard jogging enabled and targets initialized.")
+
+                    self.keyboard_enabled = True
+                    print("Keyboard jogging enabled. Targets initialized to actual positions.")
+
+                # kick off safe initialization
+                self.after(50, init_jog_targets_safely)
 
         except Exception as e:
             print(f"⚠️ Failed to set axis state: {e}")
@@ -554,6 +672,11 @@ class ODriveGUI(ctk.CTk):
             )
         else:
             print(f"⚠️ Node {node_id}: feedback unavailable — cannot zero.")
+
+    # --- Zero All button ---
+    def zero_all(self):
+        for i in range(3):
+            self.zero_node(i)
 
 
 
@@ -840,8 +963,15 @@ class ODriveGUI(ctk.CTk):
         self.keys_down.add(event.keysym)
 
     def on_key_release(self, event):
-        if event.keysym in self.keys_down:
-            self.keys_down.remove(event.keysym)
+        ks = event.keysym
+        if ks in self.keys_down:
+            self.keys_down.remove(ks)
+
+        # When shift is released, clear all jog keys to avoid stale presses
+        if ks in ("Shift_L", "Shift_R"):
+            for bad in ["Y", "H", "U", "J", "I", "K"]:
+                if bad in self.keys_down:
+                    self.keys_down.remove(bad)
 
     def keyboard_control_loop(self):
         if self.keyboard_enabled and getattr(self.mgr, "bus", None):
@@ -849,30 +979,40 @@ class ODriveGUI(ctk.CTk):
             shift = ("Shift_L" in self.keys_down or "Shift_R" in self.keys_down)
 
             # jogging increment - tune if not smooth
-            delta = 0.01  # turns per tick
+            delta = 0.005  # turns per tick
 
-            if shift:
+            if shift and any(k in self.keys_down for k in ["Y","H","U","J","I","K"]):
+                affected_nodes = []
+
                 # node 0
                 if "Y" in self.keys_down:
                     self.jog_target[0] += delta
+                    affected_nodes.append(0)
                 if "H" in self.keys_down:
                     self.jog_target[0] -= delta
+                    affected_nodes.append(0)
 
                 # node 1
                 if "U" in self.keys_down:
                     self.jog_target[1] += delta
+                    affected_nodes.append(1)
                 if "J" in self.keys_down:
                     self.jog_target[1] -= delta
+                    affected_nodes.append(1)
 
                 # node 2
                 if "I" in self.keys_down:
                     self.jog_target[2] += delta
+                    affected_nodes.append(2)
                 if "K" in self.keys_down:
                     self.jog_target[2] -= delta
+                    affected_nodes.append(2)
 
-                # send updated position to all nodes
-                for n in getattr(self.mgr, "nodes", []):
-                    self.mgr.set_position(n, self.jog_target[n])
+                for n in set(affected_nodes):
+                    tgt = self.jog_target[n]
+                    print(f"🕹 Jog cmd → node {n}: target={tgt:.4f} turns")
+                    self.mgr.set_position(n, tgt)
+            
 
         # schedule again
-        self.after(30, self.keyboard_control_loop)    # first arg is time in between in ms 
+        self.after(5, self.keyboard_control_loop)    # first arg is time in between in ms 

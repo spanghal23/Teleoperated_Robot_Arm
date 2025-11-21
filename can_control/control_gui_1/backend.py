@@ -332,7 +332,7 @@ class ODriveManager:
             "axis0.motor.motor_thermistor.config.enabled": False,
 
             "axis0.controller.config.control_mode": 3,
-            "axis0.controller.config.input_mode": 1,
+            "axis0.controller.config.input_mode": 3,
             "axis0.controller.config.vel_limit": vel_limit,
             "axis0.controller.config.vel_limit_tolerance": vel_tol,
 
@@ -365,6 +365,8 @@ class ODriveManager:
             cfg["axis0.controller.config.vel_gain"] = vel_gain
         if vel_int_gain is not None:
             cfg["axis0.controller.config.vel_integrator_gain"] = vel_int_gain
+
+        
 
         # --- save to file if requested ---
         if save_path:
@@ -426,6 +428,9 @@ class ODriveManager:
                 vel_tol=vel_tol,
                 torque_min=torque_min,
                 torque_max=torque_max,
+                pos_gain = pos_gain,
+                vel_gain = vel_gain,
+                vel_int_gain = vel_int_gain,
                 save_path=config_path,
             )
 
