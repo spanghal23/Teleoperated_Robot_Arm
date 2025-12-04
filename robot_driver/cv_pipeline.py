@@ -66,7 +66,7 @@ class CVPipeline:
       - GUI polls data
     """
 
-    def __init__(self, cam_index: int = CAM_INDEX):
+    def __init__(self, cam_index: int = CAM_INDEX, cv_to_node=None):
         self.cam_index = cam_index
         self.running   = False
 
@@ -85,6 +85,9 @@ class CVPipeline:
 
         # for smoothing
         self.prev_angles = {}
+
+        # Mapping supplied externally by the GUI
+        self.cv_to_node = cv_to_node
 
 
     # ---------------- PUBLIC API ----------------

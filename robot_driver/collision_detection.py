@@ -35,12 +35,12 @@ ANGLE_OFFSETS_DEG = {
 # Conservative hard limits for CV joints (degrees)
 # SAFE_LIMITS_DEG clamps the robot’s behavior into your “allowed” joint range.
 SAFE_LIMITS_DEG = {
-    "left_shoulder": (-60.0, 60.0),
-    "left_elbow":    (-90.0,   90.0),
+    "left_shoulder": (-90.0, 90.0),   # node 1
+    "left_elbow":    (-90.0, 90.0),   # node 2
     "left_wrist":    (-60.0, 60.0),
 
-    "right_shoulder": (-60.0, 60.0), 
-    "right_elbow":    (-90.0,   90.0),
+    "right_shoulder": (-60.0, 60.0),  # node 3 <- no collision detection but still processing 
+    "right_elbow":    (-180,   180),    # node 0
     "right_wrist":   (-60.0, 60.0),
 }
 
@@ -60,7 +60,7 @@ def remap(val, in_min, in_max, out_min, out_max):
 
 
 class CollisionDetector:
-    def __init__(self, urdf_path=None, use_gui=False):
+    def __init__(self, urdf_path=None, use_gui=False, joint_map = None):
         # --- choose URDF path ---
         if urdf_path is None:
             urdf_path = os.path.join(HERE, "urdf", "project_arm.urdf")
@@ -72,11 +72,17 @@ class CollisionDetector:
 
         # Mapping from CV joint names to robot URDF joint names
         # Easy to change later
+        # Default mapping from CV joint names to URDF joint names
         self.joint_map = {
-            "left_shoulder": "node0",
-            "left_elbow":    "node1",
-            "right_elbow":    "node2",
+            "right_elbow":  "node0",   
+            "left_shoulder": "node1",
+            "left_elbow":    "node2",
         }
+
+        # If caller supplies a custom mapping, use that instead
+        if joint_map is not None:
+            self.joint_map = joint_map
+
 
         # cache for last processed angles (for GUI debug)
         self.last_processed_angles = {}
@@ -190,15 +196,24 @@ class CollisionDetector:
             if val is None:
                 continue
 
-            # Special handling for elbows: map human CV angle range to robot joint range
-            if cv_name in ["left_elbow", "right_elbow"]:
-                # CV elbow approx 35–165 deg -> robot 0–180 deg
+            # remapping: map human CV angle range to robot joint range
+            if cv_name in ["left_elbow"]:
+                # 35–165 human range → -90–90 robot range
                 ang = remap(val, 35.0, 165.0, -90.0, 90.0)
+
+            elif cv_name in ["left_shoulder", "right_shoulder"]:
+                # Shoulders are often similar but you can change this anytime
+                ang = remap(val, 15.0, 180.0, -90.0, 90.0)
+
+            elif cv_name in ["right_elbow"]:
+                ang = remap(val, 35.0, 165.0, -180.0, 180.0)
+
             else:
-                # shoulders etc: simple scale + offset
-                scale = ANGLE_SCALES.get(cv_name, 1.0)
-                offset = ANGLE_OFFSETS_DEG.get(cv_name, 0.0)
-                ang = val * scale + offset
+                # Default case (wrist, etc.)
+                ang = val
+
+            # Apply sign flip and offset AFTER remapping
+            ang = ang * ANGLE_SCALES[cv_name] + ANGLE_OFFSETS_DEG[cv_name]
 
             # clamp to safe limits
             amin, amax = SAFE_LIMITS_DEG.get(cv_name, (-180.0, 180.0))

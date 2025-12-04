@@ -57,6 +57,40 @@ class ODriveGUI(ctk.CTk):
 
         self.cv_pipeline = None
 
+
+        # Canonical mapping: which CV joint controls which ODrive node
+        self.node0 = "right_elbow"
+        self.node1 = "left_shoulder"
+        self.node2 = "left_elbow"
+        self.node3 = "right_shoulder"
+
+        # Single source of truth
+        self.node_to_cv = {
+            0: self.node0,
+            1: self.node1,
+            2: self.node2,
+            3: self.node3
+        }
+        # Reverse lookup, used when you have a joint name and need the node id
+        self.cv_to_node = {name: node for node, name in self.node_to_cv.items()}
+
+        # Mapping CV joint names → URDF joint names used in pybullet  (diff format to self.node_to_cv)
+        # No node 3 in urdf
+        self.joint_map = {
+            "right_elbow":  "node0",   
+            "left_shoulder": "node1",
+            "left_elbow":    "node2",
+        }
+
+        # individual node follow-state flags
+        self.node_follow = {
+            0: False,
+            1: False,
+            2: False,
+            3: False
+        }
+
+
         # ---------- main frame ----------
         main = ctk.CTkFrame(self)
         main.pack(padx=20, pady=10, fill="both", expand=True)
@@ -168,38 +202,70 @@ class ODriveGUI(ctk.CTk):
         self.cv_angle_frame.grid_columnconfigure(1, weight=1)   # value
         self.cv_angle_frame.grid_columnconfigure(2, weight=1)   # mapped joint
 
+        # ---- Header Row ----
+        ctk.CTkLabel(
+            self.cv_angle_frame,
+            text="CV Arm Joint",
+            font=self.font_label_bold
+        ).grid(row=0, column=0, sticky="w", padx=10, pady=(4, 6))
 
-        # ---- LEFT SHOULDER ROW ----
-        ctk.CTkLabel(self.cv_angle_frame, text="Left Shoulder", font=self.font_label)\
-            .grid(row=0, column=0, sticky="w", padx=10, pady=4)
+        ctk.CTkLabel(
+            self.cv_angle_frame,
+            text="Angle",
+            font=self.font_label_bold
+        ).grid(row=0, column=1, sticky="w", padx=10, pady=(4, 6))
 
-        self.cv_angle_shoulder_val = ctk.CTkLabel(self.cv_angle_frame, text="--°", font=self.font_label)
-        self.cv_angle_shoulder_val.grid(row=0, column=1, sticky="w", padx=10, pady=4)
+        ctk.CTkLabel(
+            self.cv_angle_frame,
+            text="Mapped Node",
+            font=self.font_label_bold
+        ).grid(row=0, column=2, sticky="w", padx=10, pady=(4, 6))
 
-        ctk.CTkLabel(self.cv_angle_frame, text="Node 0", font=self.font_label)\
-            .grid(row=0, column=2, sticky="w", padx=10, pady=4)
 
+        # ---- RIGHT ELBOW ROW : Node 0----
 
-        # ---- LEFT ELBOW ROW ----
-        ctk.CTkLabel(self.cv_angle_frame, text="Left Elbow", font=self.font_label)\
+        ctk.CTkLabel(self.cv_angle_frame, text=self.pretty(self.node0), font=self.font_label)\
             .grid(row=1, column=0, sticky="w", padx=10, pady=4)
 
-        self.cv_angle_elbow_val = ctk.CTkLabel(self.cv_angle_frame, text="--°", font=self.font_label)
-        self.cv_angle_elbow_val.grid(row=1, column=1, sticky="w", padx=10, pady=4)
+        self.cv_angle_node0_val = ctk.CTkLabel(self.cv_angle_frame, text="--°", font=self.font_label)
+        self.cv_angle_node0_val.grid(row=1, column=1, sticky="w", padx=10, pady=4)
 
-        ctk.CTkLabel(self.cv_angle_frame, text="Node 1", font=self.font_label)\
+        ctk.CTkLabel(self.cv_angle_frame, text="→   Node 0", font=self.font_label)\
             .grid(row=1, column=2, sticky="w", padx=10, pady=4)
 
 
-        # ---- RIGHT ELBOW ROW ----
-        ctk.CTkLabel(self.cv_angle_frame, text="Right Elbow", font=self.font_label)\
+        # ---- LEFT SHOLDER ROW : Node 1 ----
+        ctk.CTkLabel(self.cv_angle_frame, text=self.pretty(self.node1), font=self.font_label)\
             .grid(row=2, column=0, sticky="w", padx=10, pady=4)
 
-        self.cv_angle_wrist_val = ctk.CTkLabel(self.cv_angle_frame, text="--°", font=self.font_label)
-        self.cv_angle_wrist_val.grid(row=2, column=1, sticky="w", padx=10, pady=4)
+        self.cv_angle_node1_val = ctk.CTkLabel(self.cv_angle_frame, text="--°", font=self.font_label)
+        self.cv_angle_node1_val.grid(row=2, column=1, sticky="w", padx=10, pady=4)
 
-        ctk.CTkLabel(self.cv_angle_frame, text="Node 2", font=self.font_label)\
+        ctk.CTkLabel(self.cv_angle_frame, text="→   Node 1", font=self.font_label)\
             .grid(row=2, column=2, sticky="w", padx=10, pady=4)
+
+
+        # ---- LEFT ELBOW ROW : Node  2----
+        ctk.CTkLabel(self.cv_angle_frame, text=self.pretty(self.node2), font=self.font_label)\
+            .grid(row=3, column=0, sticky="w", padx=10, pady=4)
+
+        self.cv_angle_node2_val = ctk.CTkLabel(self.cv_angle_frame, text="--°", font=self.font_label)
+        self.cv_angle_node2_val.grid(row=3, column=1, sticky="w", padx=10, pady=4)
+
+        ctk.CTkLabel(self.cv_angle_frame, text="→   Node 2", font=self.font_label)\
+            .grid(row=3, column=2, sticky="w", padx=10, pady=4)
+        
+
+        # ---- RIGHT SHOULDER ROW : Node  3----
+        ctk.CTkLabel(self.cv_angle_frame, text=self.pretty(self.node3), font=self.font_label)\
+            .grid(row=4, column=0, sticky="w", padx=10, pady=4)
+
+        self.cv_angle_node3_val = ctk.CTkLabel(self.cv_angle_frame, text="--°", font=self.font_label)
+        self.cv_angle_node3_val.grid(row=4, column=1, sticky="w", padx=10, pady=4)
+
+        ctk.CTkLabel(self.cv_angle_frame, text="→   Node 3", font=self.font_label)\
+            .grid(row=4, column=2, sticky="w", padx=10, pady=4)
+
 
 
 
@@ -227,7 +293,7 @@ class ODriveGUI(ctk.CTk):
         # ---------- Node angle debug line (between sim and report) ----------
         self.coldetec_joint_label = ctk.CTkLabel(
             self.cv_coldetech_frame,
-            text="Node 0: --°   |   Node 1: --°   |   Node 2: --°",
+            text="Node 0: --°   |   Node 1: --°   |   Node 2: --°\nNode 3: n/a",
             font=self.font_label,
             anchor="center",
         )
@@ -296,10 +362,36 @@ class ODriveGUI(ctk.CTk):
 
         self.cv_follow_btn.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="ew")
 
+        # Sub-frame for node follow buttons (4 columns)
+        self.node_follow_frame = ctk.CTkFrame(self.cv_motorcoms_frame, fg_color="transparent")
+        self.node_follow_frame.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="ew")
+
+        # Allow 4 equal columns inside this frame
+        for c in range(4):
+            self.node_follow_frame.grid_columnconfigure(c, weight=1)
+
+        self.node_follow_btns = {}
+
+        for i in range(4):
+            btn = ctk.CTkButton(
+                self.node_follow_frame,  
+                text=f"Node {i}",
+                width=60,
+                height=28,
+                fg_color="#4a4a4a",
+                hover_color="#5c5c5c",
+                font=self.font_button_small if hasattr(self, "font_button_small") else self.font_button,
+                command=lambda idx=i: self._on_node_follow_pressed(idx)
+            )
+            btn.grid(row=0, column=i, padx=4, pady=2, sticky="ew")
+            self.node_follow_btns[i] = btn
+
+
+
 
         # === Axis state controls (Idle / Closed loop) ===
         axis_frame = ctk.CTkFrame(self.cv_motorcoms_frame, fg_color="transparent")
-        axis_frame.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="ew")
+        axis_frame.grid(row=3, column=0, padx=10, pady=(0, 10), sticky="ew")
         axis_frame.grid_columnconfigure(0, weight=1)
         axis_frame.grid_columnconfigure(1, weight=1)
 
@@ -329,7 +421,7 @@ class ODriveGUI(ctk.CTk):
 
         # === Zero encoders and home controls ===
         zero_frame_cv = ctk.CTkFrame(self.cv_motorcoms_frame, fg_color="transparent")
-        zero_frame_cv.grid(row=3, column=0, padx=10, pady=(0, 10), sticky="ew")
+        zero_frame_cv.grid(row=4, column=0, padx=10, pady=(0, 10), sticky="ew")
 
         # -------- Row 0: Zero Node 0,1,2 (unchanged style) --------
         for i in range(4):
@@ -381,7 +473,7 @@ class ODriveGUI(ctk.CTk):
 
         # === Command table: node, target deg, target turns ===
         cmd_table = ctk.CTkFrame(self.cv_motorcoms_frame, fg_color="gray14", corner_radius=6)
-        cmd_table.grid(row=4, column=0, padx=10, pady=(0, 10), sticky="nsew")
+        cmd_table.grid(row=5, column=0, padx=10, pady=(0, 10), sticky="nsew")
 
         cmd_table.grid_columnconfigure(0, weight=1)
         cmd_table.grid_columnconfigure(1, weight=1)
@@ -1420,7 +1512,7 @@ class ODriveGUI(ctk.CTk):
     def start_cv(self):
         if self.cv_pipeline is None:
             from cv_pipeline import CVPipeline
-            self.cv_pipeline = CVPipeline()
+            self.cv_pipeline = CVPipeline(cv_to_node = self.cv_to_node)
 
         # START CV THREAD
         self.cv_pipeline.start()
@@ -1428,7 +1520,7 @@ class ODriveGUI(ctk.CTk):
         # START COLLISION DETECTOR
         if not hasattr(self, "collision_detector") or self.collision_detector is None:
             from collision_detection import CollisionDetector
-            self.collision_detector = CollisionDetector(use_gui=False)
+            self.collision_detector = CollisionDetector(use_gui=False, joint_map = self.joint_map)
 
         # BEGIN GUI UPDATE LOOPS
         self.cv_update_loop()
@@ -1451,18 +1543,22 @@ class ODriveGUI(ctk.CTk):
         # fetch angles
         angles = self.cv_pipeline.get_latest_angles()
 
-        # update labels (None → "--")
-        l_shoulder = angles.get("left_shoulder")
-        l_elbow    = angles.get("left_elbow")
-        r_wrist    = angles.get("right_elbow")
 
+        self.node_to_label = {
+            0: self.cv_angle_node0_val,
+            1: self.cv_angle_node1_val,
+            2: self.cv_angle_node2_val,
+            3: self.cv_angle_node3_val,
+        }
 
-        if l_shoulder is not None:
-            self.cv_angle_shoulder_val.configure(text=f"{l_shoulder:.1f}°")
-        if l_elbow is not None:
-            self.cv_angle_elbow_val.configure(text=f"{l_elbow:.1f}°")
-        if r_wrist is not None:
-            self.cv_angle_wrist_val.configure(text=f"{r_wrist:.1f}°")
+        for node_index, joint_name in self.node_to_cv.items():
+            angle = angles.get(joint_name)
+            label = self.node_to_label[node_index]
+
+            if angle is None:
+                label.configure(text="--°")
+            else:
+                label.configure(text=f"{angle:.1f}°")
 
 
         # re-run every ~30ms
@@ -1551,10 +1647,10 @@ class ODriveGUI(ctk.CTk):
             dead_time = now - self.last_valid_cv_time
 
             if dead_time > 0.4:     # 400 ms of no angles = fail-safe engages
-                angles_to_use = {
-                    "left_shoulder": 0.0,
-                    "left_elbow":    100.0,
-                    "right_elbow":   100.0,
+                angles_to_use = { 
+                    "left_shoulder": 100.0,      # node 1
+                    "left_elbow":    100.0,      # node 2
+                    # "right_elbow":   100.0,      # node 0 -> doesnt rlly matter
                 }
             else:
                 # still within tolerance → use last angles or smoothing output
@@ -1600,7 +1696,7 @@ class ODriveGUI(ctk.CTk):
             text = (
                 f"Node 0: {fmt(node0_angle)}   |   "
                 f"Node 1: {fmt(node1_angle)}   |   "
-                f"Node 2: {fmt(node2_angle)}"
+                f"Node 2: {fmt(node2_angle)}\nNode 3: n/a"
             )
             self.coldetec_joint_label.configure(text=text)
 
@@ -1646,12 +1742,7 @@ class ODriveGUI(ctk.CTk):
 
         processed_angles keys: 'left_shoulder', 'left_elbow', 'right_elbow'
         """
-        # Map CV joint names → node indices
-        cv_to_node = {
-            "left_shoulder": 0,
-            "left_elbow":    1,
-            "right_elbow":   2,
-        }
+
 
         # First reset everything
         for node_id in range(4):
@@ -1668,7 +1759,7 @@ class ODriveGUI(ctk.CTk):
                     self.cv_cmd_turn_labels[node_id].configure(text="--")
 
         # Now fill rows for nodes 0–2 using processed angles
-        for cv_name, node_id in cv_to_node.items():
+        for cv_name, node_id in self.cv_to_node.items():
             deg = processed_angles.get(cv_name)
             if deg is None:
                 continue
@@ -1684,27 +1775,33 @@ class ODriveGUI(ctk.CTk):
                 self.cv_cmd_turn_labels[node_id].configure(text=f"{turns:.4f}")
 
 
-
     def _on_cv_follow_pressed(self):
-        # toggle state
         self.cv_follow_state = not self.cv_follow_state
 
         if self.cv_follow_state:
-            # ON: green
+            # turn all nodes ON
+            for i in self.node_follow:
+                self.node_follow[i] = True
+            self._refresh_node_follow_buttons()
+
             self.cv_follow_btn.configure(
                 text="follow CV: on",
-                fg_color="#2F9976",     # green
-                hover_color="#37A785"
+                fg_color="#7B2F99",   # purple when all ON
+                hover_color="#9748CC"
             )
         else:
-            # OFF: gray
+            # turn all nodes OFF
+            for i in self.node_follow:
+                self.node_follow[i] = False
+            self._refresh_node_follow_buttons()
+
             self.cv_follow_btn.configure(
                 text="follow CV: off",
-                fg_color="#4a4a4a",
-                hover_color="#5c5c5c"
+                fg_color="#4a4a4a"   # gray when OFF
             )
 
-        print(f"[CV FOLLOW] Follow CV = {self.cv_follow_state}")
+
+
 
 
     def _apply_odrive_commands(self, processed: dict):
@@ -1732,6 +1829,10 @@ class ODriveGUI(ctk.CTk):
         for cv_name, node_id in cv_to_node.items():
             deg = processed.get(cv_name)
             if deg is None:
+                continue
+
+            # skip nodes that are NOT following CV
+            if not self.node_follow.get(node_id, False):
                 continue
 
             # Step 1: convert deg → delta turns
@@ -1771,6 +1872,44 @@ class ODriveGUI(ctk.CTk):
             })
 
             print(f"🎯 Node {node_id}: abs_target={target_abs:.3f} (zero={zero:.3f}, Δ={delta:+.3f})")
+    
+
+    def pretty(self, name):
+        return name.replace("_", " ").title()
+    
+
+    def _on_node_follow_pressed(self, idx):
+        # Flip this node's state
+        self.node_follow[idx] = not self.node_follow[idx]
+
+        # If ANY node is following, master must be ON
+        if any(self.node_follow.values()):
+            self.cv_follow_state = True
+            self.cv_follow_btn.configure(
+                text="follow CV: on",
+                fg_color="#2F9976",   # green when ON
+                
+            )
+        else:
+            # No nodes are following
+            self.cv_follow_state = False
+            self.cv_follow_btn.configure(
+                text="follow CV: off",
+                fg_color="#4a4a4a"
+            )
+
+        self._refresh_node_follow_buttons()
+
+
+    def _refresh_node_follow_buttons(self):
+        for idx, btn in self.node_follow_btns.items():
+            if self.node_follow[idx]:
+                btn.configure(text=f"Node {idx}: on", fg_color="#2F9976", hover_color="#37A785")
+            else:
+                btn.configure(text=f"Node {idx}: off", fg_color="#4a4a4a")
+
+
+        
 
 
 from PIL import Image, ImageDraw
