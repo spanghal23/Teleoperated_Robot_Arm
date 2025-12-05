@@ -206,7 +206,7 @@ class CollisionDetector:
                 ang = remap(val, 15.0, 180.0, -90.0, 90.0)
 
             elif cv_name in ["right_elbow"]:
-                ang = remap(val, 35.0, 165.0, -180.0, 180.0)
+                ang = remap(val, 35.0, 165.0, -90.0, 90.0)
 
             else:
                 # Default case (wrist, etc.)

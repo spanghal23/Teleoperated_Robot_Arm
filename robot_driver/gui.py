@@ -6,6 +6,7 @@ from PIL import Image, ImageTk
 import numpy as np
 from customtkinter import CTkImage
 import math
+import serial
 
 
 
@@ -71,6 +72,13 @@ class ODriveGUI(ctk.CTk):
             2: self.node2,
             3: self.node3
         }
+
+        self.node_to_cv_inv = {
+            self.node0: 0,
+            self.node1: 1,
+            self.node2: 2,
+        }
+
         # Reverse lookup, used when you have a joint name and need the node id
         self.cv_to_node = {name: node for node, name in self.node_to_cv.items()}
 
@@ -544,8 +552,13 @@ class ODriveGUI(ctk.CTk):
         if len(ports) == 0:
             ports = ["No Ports"]  # fallback so dropdown isn't empty
 
+        # Default to /dev/ttyACM0 when present so users don't have to pick it manually.
+        default_port = next((p for p in ports if "ACM0" in p), None)
+        if default_port is None:
+            default_port = ports[0]
+
         # Dropdown for serial ports
-        self.gimbal_port_var = ctk.StringVar(value=ports[0])
+        self.gimbal_port_var = ctk.StringVar(value=default_port)
         self.gimbal_port_dropdown = ctk.CTkOptionMenu(
             sec1,
             variable=self.gimbal_port_var,
@@ -669,7 +682,7 @@ class ODriveGUI(ctk.CTk):
         # ---------- 5. Position Control ----------
         sec5 = ctk.CTkFrame(self.left_col)
         sec5.pack(fill="x", pady=10)
-        ctk.CTkLabel(sec5, text="5. Position Control (relative turns):", font=self.font_header).grid(row=0, column=0, padx=10, sticky="w")
+        ctk.CTkLabel(sec5, text="5. Position Control (relative turns):", font=self.font_header).grid(row=0, column=0, padx=5, sticky="w")
 
         self.pos_entries = {}
         for i in range(3):
@@ -678,7 +691,22 @@ class ODriveGUI(ctk.CTk):
             e.grid(row=0, column=2*i+2, padx=5)
             self.pos_entries[i] = e
 
-        ctk.CTkButton(sec5, text="Send Control", command=self.threaded(self.send_positions), font=self.font_button).grid(row=0, column=8, padx=10)
+        ctk.CTkButton(sec5, text="Send Control", command=self.threaded(self.send_positions), font=self.font_button, width=50).grid(row=0, column=8, padx=5)
+
+
+        # ---------- 5b. Gimbal Position (degrees) ----------
+        ctk.CTkLabel(sec5, text="Gimbal angle (deg):").grid(row=0, column=9, padx=(40,5), pady=5, sticky="w")
+
+        self.gimbal_deg_entry = ctk.CTkEntry(sec5, width=80)
+        self.gimbal_deg_entry.grid(row=0, column=10, padx=5)
+
+        ctk.CTkButton(
+            sec5,
+            text="Send Gimbal Angle",
+            command=self.threaded(self._send_gimbal_angle_from_entry),
+            font=self.font_button
+        ).grid(row=0, column=11, padx=10)
+
 
         # ---------- 6. Error Handling ----------
         sec6 = ctk.CTkFrame(self.left_col)
@@ -1503,10 +1531,73 @@ class ODriveGUI(ctk.CTk):
 
 
 
-    ## to do
 
     def connect_gimbal(self):
-        pass
+        port = self.gimbal_port_var.get()
+        baud = 115200   # SimpleFOC default, adjust if yours is different
+
+        try:
+            # Open and store the serial connection
+            self.gimbal_ser = serial.Serial(
+                port,
+                baudrate=baud,
+                timeout=0.02
+            )
+            print(f"[GIMBAL] Connected on {port}")
+
+            # Optional background reader for incoming telemetry
+            self._gimbal_running = True
+            threading.Thread(target=self._gimbal_reader, daemon=True).start()
+
+        except Exception as e:
+            print(f"[ERROR] Failed to connect to gimbal on {port}: {e}")
+
+
+
+    def _gimbal_reader(self):
+        """ Continuously read any Commander output so the GUI never blocks. """
+        while getattr(self, "_gimbal_running", False):
+            try:
+                if self.gimbal_ser.in_waiting:
+                    line = self.gimbal_ser.readline().decode(errors="ignore").strip()
+                    if line:
+                        print("[GIMBAL RX]", line)
+            except Exception:
+                break
+
+    
+    def send_gimbal_cmd(self, angle):
+        """Send target angle to SimpleFOC (Commander 'T' command)."""
+        if not hasattr(self, "gimbal_ser") or self.gimbal_ser is None:
+            print("[GIMBAL ERROR] Not connected.")
+            return
+
+        try:
+            msg = f"T{angle}\n"
+            self.gimbal_ser.write(msg.encode())
+            print(f"[GIMBAL TX] {msg.strip()}")
+        except Exception as e:
+            print(f"[GIMBAL ERROR] Failed to send angle {angle}: {e}")
+
+
+    def send_gimbal_deg(self, deg):
+        if deg is None:
+            return
+        rad = np.deg2rad(deg)
+        self.send_gimbal_cmd(rad)
+
+    def _send_gimbal_angle_from_entry(self):
+        raw = self.gimbal_deg_entry.get().strip()
+        if not raw:
+            print("[GIMBAL] Empty angle field.")
+            return
+        try:
+            deg = float(raw)
+            self.send_gimbal_deg(deg)
+        except ValueError:
+            print(f"[GIMBAL] Invalid angle: {raw}")
+
+
 
 
     def start_cv(self):
@@ -1633,7 +1724,7 @@ class ODriveGUI(ctk.CTk):
         # ---- Detect if CV is giving us anything valid ----
         valid = any(
             angles.get(k) is not None
-            for k in ["left_shoulder", "left_elbow", "right_elbow"]
+            for k in ["left_shoulder", "left_elbow", "right_elbow", "right_shoulder"]
         )
 
         now = time.time()
@@ -1664,21 +1755,23 @@ class ODriveGUI(ctk.CTk):
 
         # update table if safe, else clear it
         if not colliding and processed:
-            self.update_cv_command_table(processed)
+            self.update_cv_command_table(processed, angles)
 
             # send to ODrive ONLY if follow-CV is active
             # === RATE LIMIT ODRIVE COMMANDS ===
             now = time.time()
             last = getattr(self, "last_odrive_update", 0)
-            if (now - last) >= 0.05:    # 0.05 sec = 20 Hz
+            if (now - last) >= 0.03:    # 0.05 sec = 20 Hz
                 self.last_odrive_update = now
 
                 if self.cv_follow_state:
-                    self._apply_odrive_commands(processed)
+                    self._apply_odrive_commands(processed, self.node_to_cv_inv)
+
+                    self.send_gimbal_deg(angles.get("right_shoulder"))
 
         else:
             # collision or no processed angles → clear table
-            self.update_cv_command_table({})
+            self.update_cv_command_table({}, angles)
 
 
 
@@ -1688,15 +1781,17 @@ class ODriveGUI(ctk.CTk):
         def fmt(a):
             return "--°" if a is None else f"{a:.1f}°"
 
-        node0_angle = processed.get("left_shoulder")
-        node1_angle = processed.get("left_elbow")
-        node2_angle = processed.get("right_elbow")
+        node0_angle = processed.get("right_elbow")
+        node1_angle = processed.get("left_shoulder")
+        node2_angle = processed.get("left_elbow")
+        node3_angle = angles.get("right_shoulder")
 
         if hasattr(self, "coldetec_joint_label"):
             text = (
                 f"Node 0: {fmt(node0_angle)}   |   "
                 f"Node 1: {fmt(node1_angle)}   |   "
-                f"Node 2: {fmt(node2_angle)}\nNode 3: n/a"
+                f"Node 2: {fmt(node2_angle)}\n"
+                f"Node 3: {fmt(node3_angle)}"
             )
             self.coldetec_joint_label.configure(text=text)
 
@@ -1735,12 +1830,12 @@ class ODriveGUI(ctk.CTk):
 
 
 
-    def update_cv_command_table(self, processed_angles: dict):
+    def update_cv_command_table(self, processed_angles: dict, angles: dict):
         """
         Update the Motor Commands table (right CV column) from
         processed robot-space angles (degrees).
 
-        processed_angles keys: 'left_shoulder', 'left_elbow', 'right_elbow'
+        processed_angles keys: 'left_shoulder', 'left_elbow', 'right_elbow' 'right_shoulder'
         """
 
 
@@ -1753,14 +1848,25 @@ class ODriveGUI(ctk.CTk):
             # turns
             if node_id in self.cv_cmd_turn_labels:
                 if node_id == 3:
-                    # node 3 is deg-driven, not turns
                     self.cv_cmd_turn_labels[node_id].configure(text="n/a")
                 else:
-                    self.cv_cmd_turn_labels[node_id].configure(text="--")
+                    right_shoulder = angles.get("right_shoulder")
+                    text = f"{right_shoulder:.1f}°" if right_shoulder is not None else "--°"
+                    self.cv_cmd_turn_labels[node_id].configure(text=text)
 
         # Now fill rows for nodes 0–2 using processed angles
         for cv_name, node_id in self.cv_to_node.items():
             deg = processed_angles.get(cv_name)
+
+            # node 3 (right_shoulder) is not part of processed_angles. Use raw CV angle.
+            if node_id == 3:
+                deg = angles.get("right_shoulder")
+                deg = self.remap(deg, 30.0, 160.0, 0.0, 360)
+                if node_id in self.cv_cmd_deg_labels:
+                    text = f"{deg:.1f}°" if deg is not None else "--°"
+                    self.cv_cmd_deg_labels[node_id].configure(text=text)
+                continue
+
             if deg is None:
                 continue
 
@@ -1804,7 +1910,7 @@ class ODriveGUI(ctk.CTk):
 
 
 
-    def _apply_odrive_commands(self, processed: dict):
+    def _apply_odrive_commands(self, processed: dict, cv_to_node):
         """
         Apply processed robot-space angles (deg) to ODrive using the
         RELATIVE zeroed frame, not absolute turns.
@@ -1818,13 +1924,6 @@ class ODriveGUI(ctk.CTk):
         """
         if not hasattr(self, "mgr") or self.mgr is None:
             return
-
-        # CV-angles to node ID
-        cv_to_node = {
-            "left_shoulder": 0,
-            "left_elbow":    1,
-            "right_elbow":   2,
-        }
 
         for cv_name, node_id in cv_to_node.items():
             deg = processed.get(cv_name)
@@ -1907,6 +2006,21 @@ class ODriveGUI(ctk.CTk):
                 btn.configure(text=f"Node {idx}: on", fg_color="#2F9976", hover_color="#37A785")
             else:
                 btn.configure(text=f"Node {idx}: off", fg_color="#4a4a4a")
+
+
+    @staticmethod
+    def remap(val, in_min, in_max, out_min, out_max):
+        """Linearly map val from one range to another."""
+        if val is None:
+            return None
+        # clamp to input range first
+        if val < in_min: 
+            val = in_min
+        if val > in_max: 
+            val = in_max
+        # normalize
+        t = (val - in_min) / (in_max - in_min)
+        return out_min + t * (out_max - out_min)
 
 
         
