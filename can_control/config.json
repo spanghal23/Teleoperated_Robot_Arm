@@ -1,11 +1,10 @@
 {
   "config.dc_bus_overvoltage_trip_level": 36,
   "config.dc_bus_undervoltage_trip_level": 10.5,
-  "config.dc_max_positive_current": 1e9,
-  "config.dc_max_negative_current": -1e9,
+  "config.dc_max_positive_current": 1000000000.0,
+  "config.dc_max_negative_current": -1000000000.0,
   "config.brake_resistor0.enable": true,
   "config.brake_resistor0.resistance": 2,
-
   "axis0.config.motor.motor_type": 0,
   "axis0.config.motor.pole_pairs": 20,
   "axis0.config.motor.torque_constant": 0.09188888888888888,
@@ -13,25 +12,16 @@
   "axis0.config.motor.current_hard_max": 38.6,
   "axis0.config.motor.calibration_current": 18,
   "axis0.config.motor.resistance_calib_max_voltage": 5,
-
   "axis0.config.calibration_lockin.current": 18,
   "axis0.motor.motor_thermistor.config.enabled": false,
-
   "axis0.controller.config.control_mode": 3,
-  "axis0.controller.config.input_mode": 1,
-  "axis0.controller.config.vel_limit": 1,
-  "axis0.controller.config.vel_limit_tolerance": 1e9,
-
-  "axis0.controller.config.pos_gain": 250,
-  "axis0.controller.config.vel_gain": 0.375,  
-  "axis0.controller.config.vel_integrator_gain": 0.9,
-
-  "axis0.config.torque_soft_min": -1e9,
-  "axis0.config.torque_soft_max": 1e9,
-
+  "axis0.controller.config.input_mode": 3,
+  "axis0.controller.config.vel_limit": 2.0,
+  "axis0.controller.config.vel_limit_tolerance": 1000000000.0,
+  "axis0.config.torque_soft_min": -1000000000.0,
+  "axis0.config.torque_soft_max": 1000000000.0,
   "can.config.protocol": 1,
   "can.config.baud_rate": 250000,
-
   "axis0.config.can.node_id": 1,
   "axis0.config.can.heartbeat_msg_rate_ms": 100,
   "axis0.config.can.encoder_msg_rate_ms": 10,
@@ -40,9 +30,11 @@
   "axis0.config.can.error_msg_rate_ms": 10,
   "axis0.config.can.temperature_msg_rate_ms": 10,
   "axis0.config.can.bus_voltage_msg_rate_ms": 10,
-
   "axis0.config.enable_watchdog": false,
   "axis0.config.load_encoder": 13,
   "axis0.config.commutation_encoder": 13,
-  "config.enable_uart_a": false
+  "config.enable_uart_a": false,
+  "axis0.controller.config.pos_gain": 250.0,
+  "axis0.controller.config.vel_gain": 0.375,
+  "axis0.controller.config.vel_integrator_gain": 0.9
 }

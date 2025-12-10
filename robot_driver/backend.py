@@ -389,14 +389,14 @@ class ODriveManager:
         import os, subprocess
 
         # --- directory layout ---
-        base_dir = os.path.dirname(os.path.abspath(__file__))                 # .../can_control/control_gui_1
-        project_root = os.path.abspath(os.path.join(base_dir, "..", ".."))    # .../me6705_final_project
+        base_dir = os.path.dirname(os.path.abspath(__file__))                 # .../me6705_final_project/robot_driver
+        project_root = os.path.abspath(os.path.join(base_dir, ".."))          # .../me6705_final_project
         can_control_dir = os.path.join(project_root, "can_control")
         odrive_can_dir = os.path.join(project_root, "ODrive-CAN")
 
         # --- critical paths ---
         can_restore_path = os.path.join(odrive_can_dir, "can_restore_config.py")
-        config_path = os.path.join(base_dir, "config.json")
+        config_path = os.path.join(can_control_dir, "config.json")
 
         # endpoints lives in can_control/, not control_gui_1
         endpoints_candidates = [

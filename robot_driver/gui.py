@@ -34,9 +34,9 @@ class ODriveGUI(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("ODrive CAN GUI (Linux Only)")
-        self.geometry("1850x900+25+75")
+        self.geometry("3700x1800+50+200")
         ctk.set_default_color_theme("blue")
-        ctk.set_widget_scaling(1.1)
+        ctk.set_widget_scaling(2.2)
 
         self.latest = {}  # cache
         self.status_running = False # bg poller flag    
@@ -57,6 +57,10 @@ class ODriveGUI(ctk.CTk):
         self.error_running = False
 
         self.cv_pipeline = None
+        self.collision_detector = None
+        self.cv_loops_running = False
+        self.cv_update_job = None
+        self.coldetec_update_job = None
 
 
         # Canonical mapping: which CV joint controls which ODrive node
@@ -88,6 +92,7 @@ class ODriveGUI(ctk.CTk):
             "right_elbow":  "node0",   
             "left_shoulder": "node1",
             "left_elbow":    "node2",
+            "right_shoulder": "node3"
         }
 
         # individual node follow-state flags
@@ -103,7 +108,7 @@ class ODriveGUI(ctk.CTk):
         main = ctk.CTkFrame(self)
         main.pack(padx=20, pady=10, fill="both", expand=True)
 
-        RIGHT_W = 450  # pick what you like (e.g., 480–600)
+        RIGHT_W = 425  # pick what you like (e.g., 480–600)
 
         # Left takes remaining space, right is fixed
         main.grid_columnconfigure(0, weight=1)             # left grows
@@ -870,9 +875,9 @@ class ODriveGUI(ctk.CTk):
         params = [
             ("Vel Limit [turn/s]", "vel_limit", 2.0),
             ("Vel Limit Tolerance", "vel_limit_tolerance", 1e9),
-            ("Position Gain (pos_gain)", "pos_gain", "250"),  # no default
-            ("Velocity Gain (vel_gain)", "vel_gain", "0.375"),  # no default
-            ("Velocity Integrator Gain (vel_integrator_gain)", "vel_integrator_gain", "0.9"),  # no default
+            ("Position Gain (pos_gain)", "pos_gain", "20"),  # no default
+            ("Velocity Gain (vel_gain)", "vel_gain", "0.167"),  # no default
+            ("Velocity Integrator Gain (vel_integrator_gain)", "vel_integrator_gain", "0.333"),  # no default
             ("Torque Soft Min", "torque_soft_min", -1e9),
             ("Torque Soft Max", "torque_soft_max", 1e9),
         ]
@@ -1614,15 +1619,56 @@ class ODriveGUI(ctk.CTk):
             self.collision_detector = CollisionDetector(use_gui=False, joint_map = self.joint_map)
 
         # BEGIN GUI UPDATE LOOPS
+        self.cv_loops_running = True
         self.cv_update_loop()
         self.coldetec_update_loop()
 
 
     def stop_cv(self):
-        pass
+        print("[CV] Shutdown requested.")
+        self.cv_loops_running = False
+
+        self._cancel_after_job("cv_update_job")
+        self._cancel_after_job("coldetec_update_job")
+
+        if self.cv_pipeline is not None:
+            try:
+                self.cv_pipeline.stop()
+            except Exception as e:
+                print(f"[CV] Error stopping pipeline: {e}")
+            self.cv_pipeline = None
+
+        if getattr(self, "collision_detector", None) is not None:
+            try:
+                self.collision_detector.shutdown()
+            except Exception as e:
+                print(f"[CD] Error during shutdown: {e}")
+            self.collision_detector = None
+
+        self._disable_cv_follow()
+        self.keyboard_enabled = False
+
+
+        blank = np.zeros((350, 640, 3), dtype=np.uint8)
+        self.update_webcam_frame(blank)
+        self.update_sim_frame(blank)
+        self.update_cv_command_table({}, {})
+
+        try:
+            self.collision_report_box.configure(state="normal")
+            self.collision_report_box.delete("1.0", "end")
+            self.collision_report_box.insert("1.0", "CV stopped. Collision monitor idle.")
+            self.collision_report_box.configure(state="disabled")
+        except Exception:
+            pass
+
+        print("[CV] Pipelines stopped, collision monitor off, nodes idled.")
 
 
     def cv_update_loop(self):
+        if not getattr(self, "cv_loops_running", False):
+            return
+
         if self.cv_pipeline is None:
             return
 
@@ -1653,7 +1699,7 @@ class ODriveGUI(ctk.CTk):
 
 
         # re-run every ~30ms
-        self.after(30, self.cv_update_loop)
+        self.cv_update_job = self.after(30, self.cv_update_loop)
 
 
 
@@ -1714,8 +1760,11 @@ class ODriveGUI(ctk.CTk):
 
 
     def coldetec_update_loop(self):
+        if not getattr(self, "cv_loops_running", False):
+            return
+
         if self.cv_pipeline is None or self.collision_detector is None:
-            self.after(30, self.coldetec_update_loop)
+            self.coldetec_update_job = self.after(30, self.coldetec_update_loop)
             return
 
         # 1. Get angles from CV and run collision detection
@@ -1809,7 +1858,7 @@ class ODriveGUI(ctk.CTk):
             print("collision report update failed:", e)
 
         # 4. Call again
-        self.after(50, self.coldetec_update_loop)
+        self.coldetec_update_job = self.after(50, self.coldetec_update_loop)
 
 
     @staticmethod
@@ -2006,6 +2055,28 @@ class ODriveGUI(ctk.CTk):
                 btn.configure(text=f"Node {idx}: on", fg_color="#2F9976", hover_color="#37A785")
             else:
                 btn.configure(text=f"Node {idx}: off", fg_color="#4a4a4a")
+
+
+    def _disable_cv_follow(self):
+        self.cv_follow_state = False
+        for idx in self.node_follow:
+            self.node_follow[idx] = False
+        self.cv_follow_btn.configure(
+            text="follow CV: off",
+            fg_color="#4a4a4a"
+        )
+        if hasattr(self, "node_follow_btns"):
+            self._refresh_node_follow_buttons()
+
+
+    def _cancel_after_job(self, attr_name):
+        job = getattr(self, attr_name, None)
+        if job:
+            try:
+                self.after_cancel(job)
+            except Exception:
+                pass
+            setattr(self, attr_name, None)
 
 
     @staticmethod

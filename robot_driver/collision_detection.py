@@ -12,11 +12,11 @@ HERE = os.path.dirname(__file__)
 
 # set to -1.0 if direction is backwards
 ANGLE_SCALES = {
-    "left_shoulder": 1.0,   
+    "left_shoulder": 1.0,
     "left_elbow":    1.0,
     "left_wrist":    1.0,
 
-    "right_shoulder": 1.0,   
+    "right_shoulder": 1.0,
     "right_elbow":    1.0,
     "right_wrist":    1.0,
 }
@@ -27,7 +27,7 @@ ANGLE_OFFSETS_DEG = {
     "left_elbow":    0.0,
     "left_wrist":    0.0,
 
-    "right_shoulder": 0.0,   
+    "right_shoulder": 0.0,
     "right_elbow":    0.0,
     "right_wrist":    0.0,
 }
@@ -39,7 +39,7 @@ SAFE_LIMITS_DEG = {
     "left_elbow":    (-90.0, 90.0),   # node 2
     "left_wrist":    (-60.0, 60.0),
 
-    "right_shoulder": (-60.0, 60.0),  # node 3 <- no collision detection but still processing 
+    "right_shoulder": (-90.0, 90.0),  # node 3
     "right_elbow":    (-180,   180),    # node 0
     "right_wrist":   (-60.0, 60.0),
 }
@@ -77,6 +77,7 @@ class CollisionDetector:
             "right_elbow":  "node0",   
             "left_shoulder": "node1",
             "left_elbow":    "node2",
+            "right_shoulder": "node3",
         }
 
         # If caller supplies a custom mapping, use that instead
@@ -321,5 +322,3 @@ class CollisionDetector:
         coll, rep = self.check(angles_deg)
         img = self.render()
         return coll, rep, img
-
-

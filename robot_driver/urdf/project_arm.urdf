@@ -87,6 +87,31 @@
     </collision>
   </link>
 
+  <!-- Third arm (half-length, mounted on link2) -->
+  <link name="link3">
+    <!-- Wrist pod -->
+    <visual>
+      <origin xyz="0 0 0"/>
+      <geometry><sphere radius="0.05"/></geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0"/>
+      <geometry><sphere radius="0.04"/></geometry>
+    </collision>
+
+    <!-- Slimmer tube (half the length of link2) -->
+    <visual>
+      <origin xyz="0 0 0.0875"/>
+      <geometry><cylinder radius="0.025" length="0.1"/></geometry>
+      <material name="arm_green"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.0875"/>
+      <geometry><cylinder radius="0.0225" length="0.1"/></geometry>
+    </collision>
+  </link>
+
   <!-- ============ JOINTS ============ -->
 
   <!-- J1: base_yaw (base_link -> link0), about Z -->
@@ -118,6 +143,15 @@
     <parent link="link1"/>
     <child link="link2"/>
     <origin xyz="-0.18 0 0.35"/>
+    <axis xyz="-1 0 0"/>
+    <limit lower="-3.1416" upper="3.1416" effort="10" velocity="2"/>
+  </joint>
+
+  <!-- J4: wrist hinge (link2 -> link3), about X -->
+  <joint name="node3" type="revolute">
+    <parent link="link2"/>
+    <child link="link3"/>
+    <origin xyz="0 0 0.35"/>
     <axis xyz="-1 0 0"/>
     <limit lower="-3.1416" upper="3.1416" effort="10" velocity="2"/>
   </joint>

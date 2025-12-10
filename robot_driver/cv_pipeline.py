@@ -16,7 +16,7 @@ os.environ['MEDIAPIPE_DISABLE_GPU'] = '1'
 
 # ===== DEFAULT CV PIPELINE SETTINGS =====
 
-CAM_INDEX = 0                      # webcam index
+CAM_INDEX = 4                      # webcam index
 CONF_THRESHOLD = 0.70             # minimum visibility before computing angles
 TARGET_FPS = 30
 TARGET_DT = 1.0 / TARGET_FPS
@@ -273,9 +273,9 @@ class CVPipeline:
                     cv2.putText(image_bgr, str(int(angles["right_shoulder"])), right_shoulder_px,
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
 
-                if angles.get("right_wrist") is not None:
-                    cv2.putText(image_bgr, str(int(angles["right_wrist"])), right_wrist_px,
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
+                # if angles.get("right_wrist") is not None:
+                #     cv2.putText(image_bgr, str(int(angles["right_wrist"])), right_wrist_px,
+                #                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
 
                 # LEFT side (blue)
                 if angles.get("left_elbow") is not None:
@@ -286,9 +286,9 @@ class CVPipeline:
                     cv2.putText(image_bgr, str(int(angles["left_shoulder"])), left_shoulder_px,
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,0), 2)
 
-                if angles.get("left_wrist") is not None:
-                    cv2.putText(image_bgr, str(int(angles["left_wrist"])), left_wrist_px,
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,0), 2)
+                # if angles.get("left_wrist") is not None:
+                #     cv2.putText(image_bgr, str(int(angles["left_wrist"])), left_wrist_px,
+                #                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,0), 2)
 
 
             # Convert BGR → RGB for GUI
@@ -308,7 +308,24 @@ class CVPipeline:
 
         # --- Cleanup once stopped ---
         if self._cap:
-            self._cap.release()
+            try:
+                self._cap.release()
+            except Exception:
+                pass
+            self._cap = None
+        if getattr(self, "_pose", None):
+            try:
+                self._pose.close()
+            except Exception:
+                pass
+            self._pose = None
+        self._mp_pose = None
+        self._mp_draw = None
+        self.latest_frame = None
+        self.latest_angles = {}
+        self.prev_angles = {}
+        self.running = False
+        self._thread = None
         cv2.destroyAllWindows()
         print("[CV] Stopped + cleaned up")
 
@@ -337,6 +354,4 @@ class CVPipeline:
 
         self.prev_angles = out
         return out
-
-
 
